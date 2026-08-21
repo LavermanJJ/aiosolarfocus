@@ -1,0 +1,13 @@
+aiosolarfocus
+Copyright 2026 Jeroen Laverman
+
+Portions of this work are derived from pysolarfocus
+(https://github.com/lavermanjj/pysolarfocus), Copyright Jeroen Laverman,
+licensed under the Apache License, Version 2.0. In particular the Modbus
+register map, the component base addressing, and the recorded behaviour of the
+Solarfocus eco manager-touch controller originate there.
+
+This product is not affiliated with, endorsed by, or supported by
+Solarfocus GmbH. "Solarfocus", "eco manager-touch", "vampair", "therminator",
+"ecotop", "octoplus" and "Pellet Elegance" are trademarks of their respective
+owners.

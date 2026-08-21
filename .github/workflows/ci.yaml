@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Lint, format, types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from the tags
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: make check
+
+  test:
+    name: Test (py${{ matrix.python-version }}, pymodbus ${{ matrix.pymodbus }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        # The floor the transport supports, the version Home Assistant's own
+        # environment resolves, and whatever 3.x is newest.
+        pymodbus: ["3.10.0", "3.14.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --python ${{ matrix.python-version }}
+      - name: Pin pymodbus
+        if: matrix.pymodbus != 'latest'
+        run: uv pip install "pymodbus==${{ matrix.pymodbus }}"
+      - run: make test-cov
+
+  docs:
+    name: Generated docs are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: make docs
+      - name: Fail if docs/registers.md is stale
+        run: git diff --exit-code -- docs/registers.md

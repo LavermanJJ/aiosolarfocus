@@ -1,0 +1,124 @@
+[project]
+name = "aiosolarfocus"
+dynamic = ["version"]
+description = "Async Python client for Solarfocus eco manager-touch heating systems"
+authors = [{ name = "Jeroen Laverman", email = "jjlaverman@web.de" }]
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.13"
+keywords = ["solarfocus", "modbus", "heating", "heat pump", "home assistant", "asyncio"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Home Automation",
+    "Typing :: Typed",
+]
+dependencies = ["pymodbus>=3.10,<4"]
+
+[project.urls]
+Homepage = "https://github.com/lavermanjj/aiosolarfocus"
+Repository = "https://github.com/lavermanjj/aiosolarfocus"
+Issues = "https://github.com/lavermanjj/aiosolarfocus/issues"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+# So the package builds in a fresh clone that has no tags yet. A release always
+# has one, because the tag is where the version comes from.
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aiosolarfocus"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/aiosolarfocus/data/registers.csv" = "aiosolarfocus/data/registers.csv"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "LICENSE", "NOTICE"]
+
+# --------------------------------------------------------------------------- #
+# ruff: linter and formatter both. Replaces black, isort and pylint.
+# --------------------------------------------------------------------------- #
+[tool.ruff]
+line-length = 180
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "ASYNC", # flake8-async: blocking calls in async code
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "D",     # pydocstyle: the comments in this codebase are its best asset
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "G",     # flake8-logging-format
+    "I",     # isort
+    "N",     # pep8-naming
+    "PL",    # pylint
+    "RUF",   # ruff-specific
+    "SIM",   # flake8-simplify
+    "TRY",   # tryceratops
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+ignore = [
+    "D203",    # incompatible with D211
+    "D213",    # incompatible with D212
+    "D107",    # the class docstring says what the constructor is for
+    "D401",    # the register helpers declare a thing rather than doing one
+    "PLR0913", # a register table constructor takes many arguments on purpose
+    "TRY003",  # exception messages here name the register and the value; that is the point
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D100", "D103", "D104", "PLR2004"]
+# German transcribed verbatim from the controller and the register document,
+# punctuation and all: the state tables have to match what the owner sees on the
+# machine, and the `doc=` strings have to match registers.csv for the cross-check
+# test to line them up. Correcting an en dash here would be inventing text.
+"src/aiosolarfocus/enums.py" = ["RUF001"]
+"src/aiosolarfocus/components/*" = ["RUF001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+# --------------------------------------------------------------------------- #
+[tool.mypy]
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "pymodbus.*"
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------- #
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src/aiosolarfocus"]
+omit = ["src/aiosolarfocus/__main__.py"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
