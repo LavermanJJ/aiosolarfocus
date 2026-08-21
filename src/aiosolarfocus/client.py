@@ -19,6 +19,7 @@ from .components import ComponentId, spec_for
 from .components.base import Component
 from .config import ComponentKey, SolarfocusConfig
 from .const import RegisterKind, Write
+from .detect import Detection, detect_through
 from .exceptions import SolarfocusConnectionError, SolarfocusError
 from .planner import ReadPlan, plan
 from .transport import ModbusTransport, Transport
@@ -176,6 +177,17 @@ class SolarfocusClient:
             round_trips=len(reads),
             duration=time.monotonic() - started,
         )
+
+    async def detect(self) -> Detection:
+        """Ask this controller what it is, over the connection already open.
+
+        An optional helper: nothing in the ordinary path calls it, and the
+        configuration this client was built from is what it goes on. Useful for
+        checking a configuration against the controller, and for a setup flow
+        that would rather not ask.
+        """
+        await self.connect()
+        return await detect_through(self._transport)
 
     def snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
         """Every reading, for diagnostics.

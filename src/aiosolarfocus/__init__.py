@@ -11,6 +11,7 @@ from .client import SolarfocusClient, UpdateResult
 from .components import ComponentId
 from .config import ComponentKey, SolarfocusConfig
 from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, Access, ApiVersion, RegisterKind, Systems
+from .detect import ComponentCounts, Detection, detect
 from .enums import (
     BOILER_STATE,
     BUFFER_STATE,
@@ -40,6 +41,7 @@ from .exceptions import (
     ValueOutOfRangeError,
 )
 from .registers import RegisterInfo
+from .sync import SolarfocusSync
 from .transport import ModbusTransport, Transport
 
 try:
@@ -57,8 +59,10 @@ __all__ = [
     "Access",
     "ApiVersion",
     "BufferMode",
+    "ComponentCounts",
     "ComponentId",
     "ComponentKey",
+    "Detection",
     "DeviceFailureError",
     "DomesticHotWaterMode",
     "HeatPumpSgReadyMode",
@@ -78,6 +82,7 @@ __all__ = [
     "SolarfocusError",
     "SolarfocusProtocolError",
     "SolarfocusRegisterError",
+    "SolarfocusSync",
     "SolarfocusTimeoutError",
     "SolarfocusValueError",
     "Systems",
@@ -87,4 +92,5 @@ __all__ = [
     "ValueOutOfRangeError",
     "__version__",
     "describe",
+    "detect",
 ]

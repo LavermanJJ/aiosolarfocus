@@ -1,0 +1,400 @@
+"""Work out what an installation looks like, by asking the controller.
+
+An optional helper. Explicit configuration is the primary path - a caller names
+the system, the firmware and the counts - and this exists so that a caller who
+would rather not can hand a `Detection` straight back as a `SolarfocusConfig`.
+
+There is no register listing the installed components, so this reads two
+different things off the controller:
+
+* **Which registers exist.** An address the firmware does not map is refused
+  with illegal data address, so probing establishes the register set - the api
+  version, and the layout of the components whose registers moved between
+  versions. It says next to nothing about installed components: on a 26.020
+  controller every documented register was mapped bar the X35 buffer sensors of
+  the buffers that are not there.
+* **What the registers say.** The specification defines "nicht vorhanden" and
+  "nicht freigeschaltet" values for the components that repeat, and an
+  unconfigured sensor channel reports a temperature far outside its range. That
+  is what the counts are taken from.
+
+The result carries the evidence it was reached from, because a heating system
+this is wrong about is one whose owner has to be able to see why.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import Any
+
+from .config import SolarfocusConfig
+from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, DEFAULT_TIMEOUT, ApiVersion, RegisterKind, Systems
+from .transport import ModbusTransport, Transport
+
+_LOGGER = logging.getLogger(__name__)
+
+INPUT = RegisterKind.INPUT
+HOLDING = RegisterKind.HOLDING
+
+#: What an unconfigured or open sensor channel reports instead of a temperature:
+#: 130.0 degC, 270.0 degC, and -1 read as unsigned. Wider than the read path's
+#: `OPEN_CHANNEL`, which leaves -1 out because -0.1 degC is a real reading; here
+#: a -1 is evidence that a channel is not configured rather than a measurement.
+NO_SENSOR = frozenset({1300, 2700, 65535})
+
+#: Heating circuit status 7 is "Heizkreis nicht freigeschaltet".
+HEATING_CIRCUIT_DISABLED = 7
+
+#: Boiler status 0 is "Boilerstatus nicht vorhanden" and buffer status 0 is
+#: "Status nicht vorhanden". The therminator systems enumerate the same states
+#: from 200, where the first is again the one meaning the component is not there.
+NOT_PRESENT = frozenset({0, 200})
+
+#: Registers a version introduced, each picked to be there whatever the
+#: installation looks like - the fourth instance of a component, or a setting -
+#: so that the version they date the controller to does not depend on what is
+#: plugged into it. Highest first: the first one the controller has wins.
+#:
+#: 25.020 and 25.030 added their registers together, so a controller on 25.020
+#: is reported as 25.030. The layout that distinction is wanted for is probed
+#: directly rather than derived from the version, so this costs nothing here.
+VERSION_MARKERS: tuple[tuple[ApiVersion, RegisterKind, int], ...] = (
+    (ApiVersion.V_26_020, HOLDING, 33415),  # HEMS target electrical power
+    (ApiVersion.V_25_030, INPUT, 2230),  # differential module 4
+    (ApiVersion.V_23_080, INPUT, 2420),  # sweep almost done
+    (ApiVersion.V_23_040, INPUT, 802),  # fresh water cascade target temperature
+    (ApiVersion.V_23_020, INPUT, 775),  # fresh water module 4 status
+    (ApiVersion.V_23_010, HOLDING, 33412),  # pellet store refilled
+    (ApiVersion.V_22_090, HOLDING, 32958),  # heating circuit 8 heating mode
+    (ApiVersion.V_21_140, INPUT, 2511),  # pv overcharge active
+)
+
+HEATING_CIRCUIT_BASE, HEATING_CIRCUIT_STRIDE, HEATING_CIRCUIT_MAX = 1100, 50, 8
+BOILER_BASE, BOILER_STRIDE, BOILER_MAX = 500, 50, 4
+BUFFER_BASE, BUFFER_STRIDE, BUFFER_MAX = 1900, 20, 4
+FRESH_WATER_BASE, FRESH_WATER_STRIDE, FRESH_WATER_MAX = 700, 25, 4
+CIRCULATION_BASE, CIRCULATION_STRIDE, CIRCULATION_MAX = 900, 25, 4
+SOLAR_BASE, SOLAR_STRIDE, SOLAR_MAX = 2100, 20, 4
+DIFFERENTIAL_BASE, DIFFERENTIAL_STRIDE, DIFFERENTIAL_MAX = 2200, 10, 4
+
+_THERMINATOR_LOG_MODES = range(1, 4)
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentCounts:
+    """How many of each repeated component an installation has."""
+
+    heating_circuits: int = 0
+    buffers: int = 0
+    boilers: int = 0
+    fresh_water_modules: int = 0
+    circulations: int = 0
+    differential_modules: int = 0
+    solar: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Detection:
+    """What one controller says it is, and what that was read off."""
+
+    api_version: ApiVersion
+    system: Systems
+    counts: ComponentCounts
+    has_heat_pump: bool
+    has_biomass_boiler: bool
+    has_photovoltaic: bool
+    has_fresh_water_module_cascade: bool
+    has_circulation_module: bool
+    evidence: Mapping[str, Any]
+    reads: int
+
+    @property
+    def confident(self) -> bool:
+        """Whether the heat generator identified itself.
+
+        False when neither the heat pump nor a biomass boiler reported anything
+        alive, in which case `system` is a default rather than a finding.
+        """
+        return self.has_heat_pump or self.has_biomass_boiler
+
+    def config(self, host: str, **overrides: Any) -> SolarfocusConfig:
+        """The configuration this installation would have been typed in as."""
+        config = SolarfocusConfig(
+            host=host,
+            system=self.system,
+            api_version=self.api_version,
+            heating_circuits=self.counts.heating_circuits,
+            buffers=self.counts.buffers,
+            boilers=self.counts.boilers,
+            fresh_water_modules=self.counts.fresh_water_modules,
+            circulations=self.counts.circulations,
+            differential_modules=self.counts.differential_modules,
+            solar=self.counts.solar,
+            fresh_water_module_cascade=self.has_fresh_water_module_cascade,
+            circulation_module=self.has_circulation_module,
+            photovoltaic=self.has_photovoltaic,
+        )
+        return replace(config, **overrides) if overrides else config
+
+
+async def detect(
+    host: str,
+    port: int = DEFAULT_PORT,
+    device_id: int = DEFAULT_DEVICE_ID,
+    *,
+    # Not a deadline for the whole run: it is the per-request Modbus timeout,
+    # handed to the transport, the same one `SolarfocusConfig.timeout` sets.
+    timeout: float = DEFAULT_TIMEOUT,  # noqa: ASYNC109
+) -> Detection:
+    """Probe a controller and work out what is on it.
+
+    Around ninety single-register reads, which is a few seconds on the
+    controllers this was written against: fine once, when somebody is setting
+    the integration up, and not something to do on every refresh.
+    """
+    transport = ModbusTransport(host, port, device_id, timeout=timeout)
+    await transport.connect()
+    try:
+        return await detect_through(transport)
+    finally:
+        await transport.disconnect()
+
+
+async def detect_through(transport: Transport) -> Detection:
+    """Detect over a connection somebody else opened.
+
+    Goes through the same transport and the same lock, so a caller who is
+    already connected pays no second socket for it.
+    """
+    return await _Prober(transport).run()
+
+
+class _Prober:
+    """One detection run, and the reads it took."""
+
+    def __init__(self, transport: Transport) -> None:
+        self._transport = transport
+        self._reads = 0
+        self._evidence: dict[str, Any] = {}
+
+    async def run(self) -> Detection:
+        """Probe the controller and work out what is on it."""
+        api_version = ApiVersion.V_20_110
+        for version, kind, address in VERSION_MARKERS:
+            if await self._exists(kind, address):
+                api_version = version
+                break
+        self._evidence["api_version_marker"] = api_version.label
+
+        # Where the state registers of the repeated components sit. The library
+        # derives these from the system and the version together - a therminator
+        # heating circuit is laid out like a 25.030 one - but the controller can
+        # simply be asked how far its blocks reach, which is both shorter and
+        # right for a combination nobody has tried yet.
+        heating_circuit_state_offset = 7 if await self._exists(INPUT, HEATING_CIRCUIT_BASE + 7) else 6
+        buffer_state_offset = 4 if await self._exists(INPUT, BUFFER_BASE + 5) else 3
+        heat_pump_is_modern = await self._exists(INPUT, 2330)
+        self._evidence["layout"] = {
+            "heating_circuit_state_offset": heating_circuit_state_offset,
+            "buffer_state_offset": buffer_state_offset,
+            "heat_pump": "25.030" if heat_pump_is_modern else "legacy",
+        }
+
+        has_heat_pump, has_biomass_boiler, system = await self._detect_system(heat_pump_is_modern)
+
+        photovoltaic_power = await self._dword(INPUT, 2500)
+        self._evidence["photovoltaic_power"] = photovoltaic_power
+
+        # The cascade and the circulation module have no documented "not
+        # present" value, so this goes by the same rule as solar: a live
+        # reading counts, a flat zero does not. Reasoned from the specification
+        # rather than measured - no installation with either was available.
+        cascade_state = await self._value(INPUT, 800)
+        cascade_flow = await self._value(INPUT, 801)
+        circulation_supply = await self._value(INPUT, 850)
+        self._evidence["fresh_water_module_cascade"] = [cascade_state, cascade_flow]
+        self._evidence["circulation_module"] = circulation_supply
+
+        counts = await self._detect_counts(heating_circuit_state_offset, buffer_state_offset)
+        counts = _clamp_to_version(counts, api_version)
+
+        detection = Detection(
+            api_version=api_version,
+            system=system,
+            counts=counts,
+            has_heat_pump=has_heat_pump,
+            has_biomass_boiler=has_biomass_boiler,
+            has_photovoltaic=bool(photovoltaic_power),
+            has_fresh_water_module_cascade=api_version >= ApiVersion.V_23_040 and (_live(cascade_state) or _live(cascade_flow)),
+            has_circulation_module=api_version >= ApiVersion.V_23_040 and _live(circulation_supply),
+            evidence=self._evidence,
+            reads=self._reads,
+        )
+        _LOGGER.info("Detected %s on firmware %s in %d reads: %s", system.value, api_version.label, self._reads, counts)
+        return detection
+
+    async def _detect_system(self, heat_pump_is_modern: bool) -> tuple[bool, bool, Systems]:
+        """Which heat generator is installed, and so which system this is."""
+        supply = await self._value(INPUT, 2300)
+        return_temperature = await self._value(INPUT, 2301)
+        heat_pump_state = await self._value(INPUT, 2330 if heat_pump_is_modern else 2326)
+        has_heat_pump = _live(supply) or _live(return_temperature) or _live(heat_pump_state)
+        self._evidence["heat_pump"] = {"supply": supply, "return": return_temperature, "state": heat_pump_state}
+
+        temperature = await self._value(INPUT, 2400)
+        status = await self._value(INPUT, 2401)
+        operating_mode = await self._value(INPUT, 2409)
+        octoplus_bottom = await self._value(INPUT, 2410)
+        octoplus_top = await self._value(INPUT, 2411)
+        log_wood = await self._value(INPUT, 2412)
+        pellets = await self._dword(INPUT, 2416)
+        operating_minutes = await self._dword(INPUT, 2402)
+        has_biomass_boiler = _live(temperature) or bool(pellets) or bool(operating_minutes)
+        self._evidence["biomass_boiler"] = {
+            "temperature": temperature,
+            "status": status,
+            "operating_mode": operating_mode,
+            "log_wood": log_wood,
+            "octoplus_buffer": [octoplus_bottom, octoplus_top],
+            "pellet_usage_total": pellets,
+            "operating_minutes": operating_minutes,
+        }
+
+        # A heat pump is a vampair whatever else is on the controller, because
+        # that is the component the library builds for it. Which biomass boiler
+        # it is has only been reasoned from the specification - no therminator,
+        # ecotop or octoplus was available to check it against - so the values
+        # it rests on are in the evidence for an owner to argue with.
+        if has_heat_pump or not has_biomass_boiler:
+            system = Systems.VAMPAIR
+        elif _live(octoplus_bottom) or _live(octoplus_top):
+            # 2410 and 2411 are the buffer of an octoplus; on the other Sigmatek
+            # boilers 2410 is a return temperature and the therminator leaves
+            # both unused.
+            system = Systems.OCTOPLUS
+        elif _live(log_wood) or (operating_mode is not None and operating_mode in _THERMINATOR_LOG_MODES):
+            # Kesselbetriebsart 1-3 all burn logs, which only a therminator does.
+            # Mode 0 is logs as well, but it is also what an unset register
+            # reads, so it is not taken as evidence of anything.
+            system = Systems.THERMINATOR
+        else:
+            # The boiler that needs the least of the library: no log wood, no
+            # sweep function, no pellet store reset. Wrong here costs a handful
+            # of entities rather than a misread register.
+            system = Systems.ECOTOP
+
+        return has_heat_pump, has_biomass_boiler, system
+
+    async def _detect_counts(self, heating_circuit_state_offset: int, buffer_state_offset: int) -> ComponentCounts:
+        """How many of each repeated component the controller is driving."""
+
+        async def instances(base: int, stride: int, maximum: int, offset: int = 0) -> list[int | None]:
+            return [await self._value(INPUT, base + stride * index + offset) for index in range(maximum)]
+
+        heating_circuits = await instances(HEATING_CIRCUIT_BASE, HEATING_CIRCUIT_STRIDE, HEATING_CIRCUIT_MAX, heating_circuit_state_offset)
+        boilers = await instances(BOILER_BASE, BOILER_STRIDE, BOILER_MAX, 1)
+        buffers = await instances(BUFFER_BASE, BUFFER_STRIDE, BUFFER_MAX, buffer_state_offset)
+        circulations = await instances(CIRCULATION_BASE, CIRCULATION_STRIDE, CIRCULATION_MAX)
+
+        # The fresh water module status has no documented enumeration, so it is
+        # taken together with the temperature of the water it is delivering.
+        fresh_water = [
+            (await self._value(INPUT, FRESH_WATER_BASE + FRESH_WATER_STRIDE * index), await self._value(INPUT, FRESH_WATER_BASE + FRESH_WATER_STRIDE * index + 1))
+            for index in range(FRESH_WATER_MAX)
+        ]
+
+        # The solar circuit has no state saying whether it is there, so it goes
+        # by the whole block reading plain zero. A channel that is configured
+        # but has no sensor on it reports 130.0 or 270.0 degC, which counts as
+        # there rather than not: an unconfigured one reads 0, the same way the
+        # buffers that are not there have no X35 register at all while the one
+        # that is has it reading 270.0.
+        solar = [[await self._value(INPUT, SOLAR_BASE + SOLAR_STRIDE * index + offset) for offset in (0, 1, 2, 3, 10, 13)] for index in range(SOLAR_MAX)]
+
+        # The differential module is read for the evidence but never counted.
+        # The same rule as solar would have claimed one on the system this was
+        # written against, whose owner could find none configured, and whose
+        # three live channels each repeated a temperature belonging to another
+        # component - the boiler, and the heat pump flow and return. Whether
+        # that is a module wired to those same points or the controller filling
+        # an unused block is not something the registers settle, and a detector
+        # filling in a form should not invent a component it cannot see. Until
+        # an installation with a known differential module can say what one
+        # looks like, this stays at zero for the owner to raise.
+        differential = [[await self._value(INPUT, DIFFERENTIAL_BASE + DIFFERENTIAL_STRIDE * index + offset) for offset in (1, 2, 4, 5)] for index in range(DIFFERENTIAL_MAX)]
+
+        self._evidence["heating_circuit_states"] = heating_circuits
+        self._evidence["boiler_states"] = boilers
+        self._evidence["buffer_states"] = buffers
+        self._evidence["fresh_water_modules"] = fresh_water
+        self._evidence["circulation_temperatures"] = circulations
+        self._evidence["solar"] = solar
+        self._evidence["differential_modules"] = differential
+
+        return ComponentCounts(
+            heating_circuits=sum(1 for state in heating_circuits if state is not None and state != HEATING_CIRCUIT_DISABLED),
+            boilers=sum(1 for state in boilers if state is not None and state not in NOT_PRESENT),
+            buffers=sum(1 for state in buffers if state is not None and state not in NOT_PRESENT),
+            fresh_water_modules=sum(1 for state, temperature in fresh_water if _live(state) or _live(temperature)),
+            circulations=sum(1 for temperature in circulations if _live(temperature)),
+            solar=sum(1 for values in solar if any(_configured(value) for value in values)),
+            differential_modules=0,
+        )
+
+    async def _probe(self, kind: RegisterKind, address: int, count: int = 1) -> tuple[int, ...] | None:
+        self._reads += 1
+        return await self._transport.probe(kind, address, count)
+
+    async def _exists(self, kind: RegisterKind, address: int) -> bool:
+        """Whether the firmware maps this address.
+
+        A 32-bit register refuses a single-register read the same way a missing
+        address does, so an address counts as absent only once it has refused
+        both of its registers as well.
+        """
+        if await self._probe(kind, address) is not None:
+            return True
+        return await self._probe(kind, address, count=2) is not None
+
+    async def _value(self, kind: RegisterKind, address: int) -> int | None:
+        """One register, or None if the controller refused it."""
+        registers = await self._probe(kind, address)
+        return None if registers is None else registers[0]
+
+    async def _dword(self, kind: RegisterKind, address: int) -> int | None:
+        """One 32-bit register, or None if the controller refused it."""
+        registers = await self._probe(kind, address, count=2)
+        return None if registers is None else (registers[0] << 16) + registers[1]
+
+
+def _live(value: int | None) -> bool:
+    """Whether a register is reporting a measurement rather than an empty channel."""
+    return value is not None and value != 0 and value not in NO_SENSOR
+
+
+def _configured(value: int | None) -> bool:
+    """Whether a channel exists at all, sensor on it or not.
+
+    Weaker than `_live`, for the components with no state register to ask. A
+    configured channel whose sensor is missing reports one of the out-of-range
+    temperatures rather than zero, so a sentinel is evidence that the component
+    is there - only a flat zero says it is not.
+    """
+    return value is not None and value != 0
+
+
+def _clamp_to_version(counts: ComponentCounts, api_version: ApiVersion) -> ComponentCounts:
+    """Drop components the detected version cannot address.
+
+    A component's registers are mapped whether or not the library can read them,
+    so a controller can report a fresh water module over a firmware that has no
+    fresh water module in it. Handing that count on would only make the
+    configuration refuse to build.
+    """
+    if api_version < ApiVersion.V_23_020:
+        counts = replace(counts, fresh_water_modules=0)
+    if api_version < ApiVersion.V_25_030:
+        counts = replace(counts, circulations=0, differential_modules=0, solar=min(counts.solar, 1))
+    return counts

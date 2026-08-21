@@ -13,13 +13,15 @@ import json
 import logging
 import sys
 from collections.abc import Iterator, Sequence
+from datetime import datetime
 from enum import IntEnum
 from typing import Any
 
 from .client import SolarfocusClient
-from .components import COMPONENTS, ComponentSpec
+from .components import COMPONENTS, ComponentId, ComponentSpec
 from .config import SolarfocusConfig
 from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, ApiVersion, Systems
+from .detect import detect
 from .exceptions import SolarfocusError
 from .layout import Layout
 from .planner import plan
@@ -87,12 +89,26 @@ def build_parser() -> argparse.ArgumentParser:
     plan_.add_argument("--verbose", "-v", action="store_true", help="name the components each read serves")
     plan_.set_defaults(run=_run_plan)
 
+    detect_ = subcommands.add_parser("detect", help="ask the controller what it is and what is wired to it")
+    _add_connection_arguments(detect_)
+    detect_.add_argument("--evidence", action="store_true", help="show what each finding was read off")
+    detect_.add_argument("--json", action="store_true", help="print the configuration ready to paste")
+    detect_.set_defaults(run=_run_detect)
+
     dump = subcommands.add_parser("dump", help="connect, read everything once, and print it")
     _add_connection_arguments(dump)
     _add_controller_arguments(dump)
     _add_count_arguments(dump)
     dump.add_argument("--json", action="store_true", help="machine-readable, and the shape a test fixture wants")
     dump.set_defaults(run=_run_dump)
+
+    watch = subcommands.add_parser("watch", help="poll, and print only what changed")
+    _add_connection_arguments(watch)
+    _add_controller_arguments(watch)
+    _add_count_arguments(watch)
+    watch.add_argument("--interval", type=float, default=10.0, help="seconds between polls (default: %(default)s)")
+    watch.add_argument("--component", help="only this component, by id")
+    watch.set_defaults(run=_run_watch)
 
     write = subcommands.add_parser("set", help="write one register, after showing what it holds now")
     _add_connection_arguments(write)
@@ -173,6 +189,48 @@ def _run_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_detect(args: argparse.Namespace) -> int:
+    return asyncio.run(_detect(args))
+
+
+async def _detect(args: argparse.Namespace) -> int:
+    detection = await detect(args.host, args.port, args.device_id)
+    config = detection.config(host=args.host, port=args.port, device_id=args.device_id)
+
+    if args.json:
+        print(json.dumps({field: _jsonable(getattr(config, field)) for field in _config_fields()}, indent=2))
+    else:
+        print(f"{args.host}:{args.port}  read in {detection.reads} probes\n")
+        rows = [
+            ("system", detection.system.value, "" if detection.confident else "  a default: no heat generator reported anything"),
+            ("firmware", detection.api_version.label, ""),
+        ]
+        for spec in COMPONENTS:
+            count = config.count_of(spec.id)
+            rows.append((spec.id.value, str(count), "  never counted; raise it yourself if you have one" if spec.id.value == "differential_modules" else ""))
+        _print_table(("", "detected", ""), rows)
+
+    if args.evidence:
+        print("\nevidence")
+        for name, value in detection.evidence.items():
+            print(f"  {name}: {value}")
+    if not detection.confident:
+        print("\nNo heat generator reported anything alive, so the system is a default rather than a finding.", file=sys.stderr)
+    return 0
+
+
+def _config_fields() -> list[str]:
+    return ["host", "port", "device_id", "system", "api_version", *(spec.id.value for spec in COMPONENTS)]
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, ApiVersion):
+        return value.label
+    if isinstance(value, Systems):
+        return value.value
+    return value
+
+
 def _run_dump(args: argparse.Namespace) -> int:
     return asyncio.run(_dump(args))
 
@@ -195,6 +253,54 @@ async def _dump(args: argparse.Namespace) -> int:
             _print_table(("register", "address", "raw", "value", "unit", ""), rows)
     print(f"\n{result}", file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def _run_watch(args: argparse.Namespace) -> int:
+    try:
+        return asyncio.run(_watch(args))
+    except KeyboardInterrupt:
+        return 0
+
+
+async def _watch(args: argparse.Namespace) -> int:
+    """Poll, and print what moved.
+
+    The tool for chasing a register whose meaning is not obvious, and for
+    watching a write land - a full dump every ten seconds tells you nothing,
+    whereas three lines that changed tells you what you came for.
+    """
+    config = _config_from(args)
+    only = [ComponentId(args.component)] if args.component else None
+    previous: dict[str, object] = {}
+    first = True
+
+    async with SolarfocusClient(config) as client:
+        print(f"{config.address}  {config.system.value}  firmware {config.api_version.label}  every {args.interval:g}s; ctrl-c to stop", file=sys.stderr)
+        while True:
+            result = await client.update(components=only)
+            stamp = datetime.now().strftime("%H:%M:%S")
+            changes = 0
+            for key, component in client.components.items():
+                if only is not None and key.id not in only:
+                    continue
+                for name, reading in component.snapshot().items():
+                    label = f"{key}.{name}"
+                    value = reading["value"]
+                    if not first and previous.get(label) != value:
+                        # Flushed: stdout to a pipe is block-buffered, so piping
+                        # this into `tee` would otherwise show nothing for
+                        # minutes at a time - the one thing a watch must not do.
+                        print(f"{stamp}  {label:52} {_render(previous[label]):>18} -> {_render(value)}", flush=True)
+                        changes += 1
+                    previous[label] = value
+            if not result.ok:
+                print(f"{stamp}  not read: " + ", ".join(f"{key} ({error.message})" for key, error in result.failed.items()), file=sys.stderr)
+            if first:
+                # Nothing can have changed on the first poll; say what is being
+                # watched, then stay quiet until something moves.
+                print(f"{stamp}  watching {len(previous)} registers", file=sys.stderr)
+                first = False
+            await asyncio.sleep(args.interval)
 
 
 def _render(value: object) -> str:
