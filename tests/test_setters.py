@@ -120,3 +120,10 @@ async def test_no_setter_writes_a_register_that_is_not_this_components(spec: Com
             continue
         for _, address, _ in writer.writes:
             assert address in mine, f"{spec.component.__name__}.{name} writes {address}, which is not one of its registers"
+
+
+@pytest.mark.parametrize(("spec", "system"), CASES, ids=IDS)
+async def test_every_derived_value_a_component_names_actually_exists(spec: ComponentSpec, system: Systems) -> None:
+    """`snapshot` reads these by name, so a rename must not leave one dangling."""
+    for name in spec.component.derived:
+        assert isinstance(getattr(spec.component, name, None), property), f"{spec.component.__name__}.{name} is named in `derived` but is not a property"

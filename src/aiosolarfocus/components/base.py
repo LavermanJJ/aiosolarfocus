@@ -45,6 +45,12 @@ class Component:
     #: silently resolved every *other* register at the wrong version.
     layout_as_of: ClassVar[Mapping[Systems, ApiVersion]] = {}
 
+    #: Properties computed from registers rather than read - a coefficient of
+    #: performance, a seasonal figure. Named here so `snapshot` carries them,
+    #: because a diagnostics dump that leaves them out is missing the numbers an
+    #: owner is most likely to be asking about.
+    derived: ClassVar[tuple[str, ...]] = ()
+
     _declared: ClassVar[tuple[Register[Any], ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -134,8 +140,14 @@ class Component:
         return {resolved.name: resolved.info() for resolved in self.layout.registers}
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
-        """Everything read, for diagnostics: raw words, decoded value, address."""
-        return {
+        """Everything read, for diagnostics: raw words, decoded value, address.
+
+        Replaces the downstream habit of reaching into `vars(component)` and
+        filtering by an internal base class, which is why the derived values are
+        here too - that filter caught them, and a dump without them would be a
+        step backwards.
+        """
+        readings: dict[str, dict[str, Any]] = {
             resolved.name: {
                 "address": resolved.address,
                 "kind": resolved.kind.value,
@@ -145,6 +157,9 @@ class Component:
             }
             for resolved in self.layout.registers
         }
+        for name in self.derived:
+            readings[name] = {"address": None, "kind": "derived", "raw": None, "value": getattr(self, name), "unit": None}
+        return readings
 
     def decode_readings(self, readings: Mapping[tuple[RegisterKind, int], int]) -> None:
         """Take this component's registers out of a completed set of reads.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from ..const import ApiVersion
 from ..enums import HeatPumpSgReadyMode
 from ..registers import HOLDING, READ_WRITE, celsius, code, energy, enum_, flag, unscaled, watts
@@ -34,6 +36,14 @@ class HeatPump(Component):
     predecessor wrote it as a fifteen-line if/else pair whose two halves differed
     only by offset.
     """
+
+    derived: ClassVar[tuple[str, ...]] = (
+        "cop_heating",
+        "cop_cooling",
+        "seasonal_performance",
+        "seasonal_performance_heating",
+        "seasonal_performance_drinking_water",
+    )
 
     supply_temperature = celsius(0, doc="Vorlauftemperatur Wärmepumpe")
     return_temperature = celsius(1, doc="Rücklauftemperatur Wärmepumpe")

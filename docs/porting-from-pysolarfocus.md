@@ -17,6 +17,14 @@ different; this is what maps to what.
 | `api.update_heating()` | `await client.update(components=[ComponentId.HEATING_CIRCUITS])` |
 | `api.is_connected` | `client.connected` |
 | `api.api_version.greater_or_equal("22.090")` | `config.api_version >= ApiVersion.V_22_090` |
+| `heatpump.performance_overall` | `heat_pump.seasonal_performance` |
+| `heatpump.performance_overall_heating` | `heat_pump.seasonal_performance_heating` |
+| `heatpump.performance_overall_drinking_water` | `heat_pump.seasonal_performance_drinking_water` |
+
+The heat pump's derived figures kept their meaning and changed their names: a
+"performance overall" that is a seasonal figure reads better as one. They are
+plain properties now rather than `PerformanceCalculator` objects, and they are
+rounded to two decimals - `pysolarfocus` reported `3.7369392844083906`.
 
 ## Writing
 
@@ -49,6 +57,9 @@ The setters live on the component.
   each consumer copying them out of the register document.
 - **Sentinel readings.** An open sensor channel decodes to `None` rather than
   130.0 °C.
+- **Rounding.** A reading is rounded to the precision its scale carries.
+  `304 * 0.1` is `30.400000000000002` in binary floating point, and the old
+  library passed that through for Home Assistant to record.
 
 ## Semantic changes to watch for
 
