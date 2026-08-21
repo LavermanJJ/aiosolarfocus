@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, overload
 
 from ..codec import decode, encode, words_to_raw
 from ..const import Access, ApiVersion, RegisterKind, Systems, Write
 from ..exceptions import ReadOnlyRegisterError, SolarfocusError, UnsupportedRegisterError
-from ..registers import Register, RegisterInfo
+from ..registers import Derived, DerivedInfo, Register, RegisterInfo
 
 if TYPE_CHECKING:
     from ..layout import Layout
@@ -45,13 +45,8 @@ class Component:
     #: silently resolved every *other* register at the wrong version.
     layout_as_of: ClassVar[Mapping[Systems, ApiVersion]] = {}
 
-    #: Properties computed from registers rather than read - a coefficient of
-    #: performance, a seasonal figure. Named here so `snapshot` carries them,
-    #: because a diagnostics dump that leaves them out is missing the numbers an
-    #: owner is most likely to be asking about.
-    derived: ClassVar[tuple[str, ...]] = ()
-
     _declared: ClassVar[tuple[Register[Any], ...]] = ()
+    _derived: ClassVar[tuple[Derived[Any], ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Collect the registers this component declares, including inherited ones.
@@ -63,16 +58,25 @@ class Component:
         """
         super().__init_subclass__(**kwargs)
         declared: dict[str, Register[Any]] = {}
+        computed: dict[str, Derived[Any]] = {}
         for klass in reversed(cls.__mro__):
             for value in vars(klass).values():
                 if isinstance(value, Register):
                     declared[value.name] = value
+                elif isinstance(value, Derived):
+                    computed[value.name] = value
         cls._declared = tuple(declared.values())
+        cls._derived = tuple(computed.values())
 
     @classmethod
     def declared(cls) -> tuple[Register[Any], ...]:
         """Every register this component declares, before any firmware gating."""
         return cls._declared
+
+    @classmethod
+    def derived(cls) -> tuple[Derived[Any], ...]:
+        """Every value this component works out from its registers."""
+        return cls._derived
 
     def __init__(self, layout: Layout, *, index: int | None = None, writer: RegisterWriter | None = None) -> None:
         self.layout = layout
@@ -119,25 +123,56 @@ class Component:
         return words_to_raw(words, signed=register.signed)
 
     def supports(self, name: str) -> bool:
-        """Whether this controller has the register declared under that name."""
-        return name in self.layout.by_name
+        """Whether this controller has a value of that name, computed or read."""
+        return name in self.layout.by_name or name in self.available_derived()
 
-    def info(self, register: Register[Any] | str) -> RegisterInfo:
-        """Describe one register as it exists on this controller."""
-        name = register if isinstance(register, str) else register.name
+    @overload
+    def info(self, value: Register[Any]) -> RegisterInfo: ...
+
+    @overload
+    def info(self, value: Derived[Any]) -> DerivedInfo: ...
+
+    @overload
+    def info(self, value: str) -> RegisterInfo | DerivedInfo: ...
+
+    def info(self, value: Register[Any] | Derived[Any] | str) -> RegisterInfo | DerivedInfo:
+        """Describe one value of this component, computed or read.
+
+        Asking with the register itself gets a `RegisterInfo` back rather than a
+        union, so the common case - what are this register's bounds - does not
+        make every caller narrow a type first.
+        """
+        name = value if isinstance(value, str) else value.name
         resolved = self.layout.by_name.get(name)
-        if resolved is None:
-            raise UnsupportedRegisterError(f"{type(self).__name__} has no {name!r}", context=self._context())
-        return resolved.info()
+        if resolved is not None:
+            return resolved.info()
+        computed = self.available_derived().get(name)
+        if computed is not None:
+            return computed
+        raise UnsupportedRegisterError(f"{type(self).__name__} has no {name!r}", context=self._context())
 
     def available_registers(self) -> Mapping[str, RegisterInfo]:
-        """Every register this controller actually has, in address order.
-
-        Home Assistant builds its entities from this instead of carrying a
-        `min_required_version` and an `unsupported_systems` list on every one of
-        a hundred entity descriptions.
-        """
+        """Every register this controller actually has, in address order."""
         return {resolved.name: resolved.info() for resolved in self.layout.registers}
+
+    def available_derived(self) -> Mapping[str, DerivedInfo]:
+        """Every computed value this controller has the registers for.
+
+        A derived value is only as available as what it is worked out from, so a
+        firmware missing one of its inputs does not have it either.
+        """
+        return {computed.name: computed.info() for computed in self._derived if all(name in self.layout.by_name for name in computed.depends_on)}
+
+    def available_values(self) -> Mapping[str, RegisterInfo | DerivedInfo]:
+        """Everything readable off this component, computed or read.
+
+        What a consumer building entities wants: it replaces carrying a
+        `min_required_version` and an `unsupported_systems` list on every one of
+        a hundred entity descriptions, and - unlike `available_registers` alone -
+        it does not quietly drop the coefficients of performance, which the
+        predecessor exposed as though they were registers.
+        """
+        return {**self.available_registers(), **self.available_derived()}
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         """Everything read, for diagnostics: raw words, decoded value, address.
@@ -157,8 +192,10 @@ class Component:
             }
             for resolved in self.layout.registers
         }
-        for name in self.derived:
-            readings[name] = {"address": None, "kind": "derived", "raw": None, "value": getattr(self, name), "unit": None}
+        for computed in self._derived:
+            if computed.name not in self.available_derived():
+                continue
+            readings[computed.name] = {"address": None, "kind": "derived", "raw": None, "value": computed.__get__(self), "unit": computed.unit}
         return readings
 
     def decode_readings(self, readings: Mapping[tuple[RegisterKind, int], int]) -> None:

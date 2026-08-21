@@ -54,6 +54,12 @@ it has not been read yet or its last read failed, or the channel is reporting
 one of the values an open sensor gives instead of a measurement.
 `component.raw()` and `component.info()` tell them apart.
 
+Values the library works out from registers — the heat pump's coefficients of
+performance, its seasonal figures — are declared beside the registers they come
+from, so `component.available_values()` offers them alongside everything else
+and `component.info()` describes them. An idle heat pump reports `None` for a
+coefficient of performance rather than zero.
+
 ## Write
 
 ```python

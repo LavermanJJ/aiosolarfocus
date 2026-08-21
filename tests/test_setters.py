@@ -123,7 +123,9 @@ async def test_no_setter_writes_a_register_that_is_not_this_components(spec: Com
 
 
 @pytest.mark.parametrize(("spec", "system"), CASES, ids=IDS)
-async def test_every_derived_value_a_component_names_actually_exists(spec: ComponentSpec, system: Systems) -> None:
-    """`snapshot` reads these by name, so a rename must not leave one dangling."""
-    for name in spec.component.derived:
-        assert isinstance(getattr(spec.component, name, None), property), f"{spec.component.__name__}.{name} is named in `derived` but is not a property"
+async def test_a_derived_value_only_depends_on_registers_that_exist(spec: ComponentSpec, system: Systems) -> None:
+    """A typo in `depends_on` would quietly make the value unavailable everywhere."""
+    declared = {register.name for register in spec.component.declared()}
+    for computed in spec.component.derived():
+        missing = set(computed.depends_on) - declared
+        assert not missing, f"{spec.component.__name__}.{computed.name} depends on {sorted(missing)}, which it does not declare"

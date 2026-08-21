@@ -139,6 +139,11 @@ System **Vampair**, firmware **26.020**.
 | evu_lock | holding | 33404 |  | signed |  |  | read_write | 20.110 |  | EVU – Lock |
 | smart_grid | holding | 33405 |  | signed |  |  | read_write | 20.110 |  | Betriebsart SG – Ready |
 | outdoor_temperature_external | holding | 33406 |  | signed | x0.1 | °C | read_write | 20.110 | -50..60 | Außentemperatur extern |
+| cop_heating | derived |  |  |  |  |  | read |  |  | Coefficient of performance while heating, right now. |
+| cop_cooling | derived |  |  |  |  |  | read |  |  | Coefficient of performance while cooling, right now. |
+| seasonal_performance | derived |  |  |  |  |  | read |  |  | Thermal energy delivered per unit of electrical energy taken, overall. |
+| seasonal_performance_heating | derived |  |  |  |  |  | read |  |  | Thermal energy per unit of electrical energy, counting only heating. |
+| seasonal_performance_drinking_water | derived |  |  |  |  |  | read |  |  | Thermal energy per unit of electrical energy, counting only hot water. |
 
 ## Photovoltaic (`photovoltaic`)
 

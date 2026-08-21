@@ -23,8 +23,18 @@ different; this is what maps to what.
 
 The heat pump's derived figures kept their meaning and changed their names: a
 "performance overall" that is a seasonal figure reads better as one. They are
-plain properties now rather than `PerformanceCalculator` objects, and they are
-rounded to two decimals - `pysolarfocus` reported `3.7369392844083906`.
+rounded to two decimals — `pysolarfocus` reported `3.7369392844083906`.
+
+They are still first-class. In `pysolarfocus` they were `PerformanceCalculator`
+objects, indistinguishable from registers to anything reading the component;
+here they are declared with `@derived` beside the registers they are worked out
+from, and they appear in `component.available_values()`, `component.info()`,
+`component.supports()`, `component.snapshot()` and the command line's
+`registers` and `dump` output.
+
+**Build entities from `available_values()`, not `available_registers()`.** The
+latter is registers only, and would drop all five coefficients of performance —
+which the Home Assistant integration has a sensor for apiece.
 
 ## Writing
 

@@ -25,7 +25,7 @@ from .detect import detect
 from .exceptions import SolarfocusError
 from .layout import Layout
 from .planner import plan
-from .registers import RegisterInfo
+from .registers import DerivedInfo, RegisterInfo
 
 #: `component.number.register` has three parts; `component.register` has two.
 _TARGET_WITHOUT_NUMBER = 2
@@ -141,13 +141,22 @@ def _row(info: RegisterInfo) -> tuple[str, ...]:
     return (info.name, info.kind.value, str(info.address), width, sign, scale, info.unit or "", info.access.value, info.since.label, bounds, info.doc)
 
 
+def _derived_row(info: DerivedInfo) -> tuple[str, ...]:
+    """A computed value has no address, no width and no sign; say so plainly."""
+    return (info.name, "derived", "", "", "", "", info.unit or "", "read", "", "", info.doc)
+
+
 _HEADINGS = ("register", "table", "address", "width", "sign", "scale", "unit", "access", "since", "range", "document name")
 
 
 def _run_registers(args: argparse.Namespace) -> int:
     system: Systems = args.system
     api_version: ApiVersion = args.api_version
-    sections = [(spec, [_row(resolved.info()) for resolved in layout.registers]) for spec, layout in _layouts(system, api_version, args.component)]
+    sections = []
+    for spec, layout in _layouts(system, api_version, args.component):
+        rows = [_row(resolved.info()) for resolved in layout.registers]
+        rows.extend(_derived_row(computed.info()) for computed in spec.component.derived() if all(name in layout.by_name for name in computed.depends_on))
+        sections.append((spec, rows))
 
     if args.markdown:
         print(
@@ -249,7 +258,9 @@ async def _dump(args: argparse.Namespace) -> int:
             rows = []
             for name, reading in component.snapshot().items():
                 note = "  no sensor" if reading["value"] is None and reading["raw"] is not None else ""
-                rows.append((name, str(reading["address"]), str(reading["raw"] if reading["raw"] is not None else "-"), _render(reading["value"]), reading["unit"] or "", note))
+                address = "" if reading["address"] is None else str(reading["address"])
+                raw = "-" if reading["raw"] is None else str(reading["raw"])
+                rows.append((name, address, raw, _render(reading["value"]), reading["unit"] or "", note))
             _print_table(("register", "address", "raw", "value", "unit", ""), rows)
     print(f"\n{result}", file=sys.stderr)
     return 0 if result.ok else 1

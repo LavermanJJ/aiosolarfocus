@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 from ..const import ApiVersion
 from ..enums import HeatPumpSgReadyMode
-from ..registers import HOLDING, READ_WRITE, celsius, code, energy, enum_, flag, unscaled, watts
+from ..registers import HOLDING, READ_WRITE, celsius, code, derived, energy, enum_, flag, unscaled, watts
 from .base import Component
 
 _V20 = ApiVersion.V_20_110
@@ -36,14 +34,6 @@ class HeatPump(Component):
     predecessor wrote it as a fifteen-line if/else pair whose two halves differed
     only by offset.
     """
-
-    derived: ClassVar[tuple[str, ...]] = (
-        "cop_heating",
-        "cop_cooling",
-        "seasonal_performance",
-        "seasonal_performance_heating",
-        "seasonal_performance_drinking_water",
-    )
 
     supply_temperature = celsius(0, doc="Vorlauftemperatur Wärmepumpe")
     return_temperature = celsius(1, doc="Rücklauftemperatur Wärmepumpe")
@@ -84,29 +74,29 @@ class HeatPump(Component):
     smart_grid = enum_(1, HeatPumpSgReadyMode, kind=HOLDING, access=READ_WRITE, signed=True, doc="Betriebsart SG – Ready")
     outdoor_temperature_external = celsius(2, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_20_110, bounds=(-50.0, 60.0), doc="Außentemperatur extern")
 
-    @property
+    @derived(depends_on=("thermal_power_heating", "electrical_power"))
     def cop_heating(self) -> float | None:
         """Coefficient of performance while heating, right now."""
         return _ratio(self.thermal_power_heating, self.electrical_power)
 
-    @property
+    @derived(depends_on=("thermal_power_cooling", "electrical_power"))
     def cop_cooling(self) -> float | None:
         """Coefficient of performance while cooling, right now."""
         return _ratio(self.thermal_power_cooling, self.electrical_power)
 
-    @property
+    @derived(depends_on=("thermal_energy_total", "electrical_energy_total"))
     def seasonal_performance(self) -> float | None:
         """Thermal energy delivered per unit of electrical energy taken, overall."""
         return _ratio(self.thermal_energy_total, self.electrical_energy_total)
 
-    @property
+    @derived(depends_on=("thermal_energy_heating", "electrical_energy_heating"))
     def seasonal_performance_heating(self) -> float | None:
-        """The same, counting only heating."""
+        """Thermal energy per unit of electrical energy, counting only heating."""
         return _ratio(self.thermal_energy_heating, self.electrical_energy_heating)
 
-    @property
+    @derived(depends_on=("thermal_energy_drinking_water", "electrical_energy_drinking_water"))
     def seasonal_performance_drinking_water(self) -> float | None:
-        """The same, counting only hot water."""
+        """Thermal energy per unit of electrical energy, counting only hot water."""
         return _ratio(self.thermal_energy_drinking_water, self.electrical_energy_drinking_water)
 
     async def set_evu_lock(self, locked: bool) -> None:

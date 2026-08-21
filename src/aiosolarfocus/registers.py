@@ -68,6 +68,80 @@ class RegisterInfo:
         return self.access is Access.READ_WRITE
 
 
+@dataclass(frozen=True, slots=True)
+class DerivedInfo:
+    """A value the library works out from registers rather than reading.
+
+    The heat pump's coefficients of performance are the only ones today. They
+    matter to a consumer as much as any register does - in the predecessor they
+    were `Part` objects, indistinguishable from registers to anything reading
+    the component - so they are described here rather than being left as
+    properties a caller has to know the names of.
+    """
+
+    name: str
+    unit: str | None
+    doc: str
+    #: The registers it is worked out from. A firmware without one of them does
+    #: not have the derived value either.
+    depends_on: tuple[str, ...]
+
+    @property
+    def writable(self) -> bool:
+        """Never: a derived value is not somewhere to put anything."""
+        return False
+
+
+class Derived[T]:
+    """A value computed from registers, declared beside them and described like them.
+
+    Used as a decorator, so the calculation and its description are one
+    declaration - the same bargain `Register` makes:
+
+        @derived(doc="Coefficient of performance while heating", depends_on=("a", "b"))
+        def cop_heating(self) -> float | None:
+            ...
+    """
+
+    __slots__ = ("_getter", "depends_on", "doc", "name", "unit")
+
+    def __init__(self, getter: Callable[[Any], T | None], *, unit: str | None, doc: str, depends_on: tuple[str, ...]) -> None:
+        self._getter = getter
+        self.unit = unit
+        self.doc = doc or (getter.__doc__ or "").strip().split("\n")[0]
+        self.depends_on = depends_on
+        self.name = getter.__name__
+
+    def __set_name__(self, owner: type[Any], name: str) -> None:
+        """Learn the attribute name the component declared this under."""
+        self.name = name
+
+    @overload
+    def __get__(self, obj: None, owner: type[Any] | None = None) -> Derived[T]: ...
+
+    @overload
+    def __get__(self, obj: Component, owner: type[Any] | None = None) -> T | None: ...
+
+    def __get__(self, obj: Component | None, owner: type[Any] | None = None) -> Derived[T] | T | None:
+        """Class access gives the description; instance access works the value out."""
+        if obj is None:
+            return self
+        return self._getter(obj)
+
+    def info(self) -> DerivedInfo:
+        """Describe this value to a caller that has to build a UI out of it."""
+        return DerivedInfo(name=self.name, unit=self.unit, doc=self.doc, depends_on=self.depends_on)
+
+
+def derived[T](*, unit: str | None = None, doc: str = "", depends_on: tuple[str, ...] = ()) -> Callable[[Callable[[Any], T | None]], Derived[T]]:
+    """Declare a value computed from this component's registers."""
+
+    def decorate(getter: Callable[[Any], T | None]) -> Derived[T]:
+        return Derived(getter, unit=unit, doc=doc, depends_on=depends_on)
+
+    return decorate
+
+
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class Register[T]:
     """One address in one component's block, and how to read and write it.
