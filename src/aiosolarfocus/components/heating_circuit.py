@@ -62,15 +62,15 @@ class HeatingCircuit(Component):
         """Set what this circuit is allowed to do, heating, cooling or both."""
         await self.write(HeatingCircuit.heating_mode, heating_mode)
 
-    async def set_target_supply_celsius(self, celsius: float) -> None:
+    async def set_target_supply_temperature(self, celsius: float) -> None:
         """Set the flow setpoint."""
         await self.write(HeatingCircuit.target_supply_temperature, celsius)
 
-    async def set_target_room_celsius(self, celsius: float) -> None:
+    async def set_target_room_temperature(self, celsius: float) -> None:
         """Set the room setpoint."""
         await self.write(HeatingCircuit.target_room_temperature, celsius)
 
-    async def set_indoor_celsius(self, celsius: float) -> None:
+    async def set_indoor_temperature(self, celsius: float) -> None:
         """Feed this circuit a room temperature from a sensor of your own."""
         await self.write(HeatingCircuit.indoor_temperature_external, celsius)
 
@@ -95,10 +95,14 @@ class HeatingCircuit(Component):
         separate blocking writes at a time, each followed by re-reading the
         whole component.
         """
+        # In the order the Home Assistant climate entity has always written
+        # them, which is the order that has actually been run against
+        # controllers - it wrote them one at a time, and this sends the same
+        # sequence in one go.
         values = {
-            HeatingCircuit.mode: mode,
-            HeatingCircuit.cooling: cooling,
-            HeatingCircuit.heating_mode: heating_mode,
             HeatingCircuit.target_supply_temperature: target_supply_temperature,
+            HeatingCircuit.cooling: cooling,
+            HeatingCircuit.mode: mode,
+            HeatingCircuit.heating_mode: heating_mode,
         }
         await self.write_many({register: value for register, value in values.items() if value is not None})

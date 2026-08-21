@@ -51,6 +51,11 @@ class Access(StrEnum):
     READ_WRITE = "read_write"
 
 
+#: One write on the wire: which table, which address, and the words to put there.
+#: A sequence of these is what goes out under one hold of the transport lock.
+type Write = tuple["RegisterKind", int, tuple[int, ...]]
+
+
 class ApiVersion(IntEnum):
     """A Solarfocus firmware version, ordered by construction.
 

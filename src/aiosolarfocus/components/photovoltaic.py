@@ -45,6 +45,6 @@ class Photovoltaic(Component):
         """Report the grid balance. Negative means exporting."""
         await self.write(Photovoltaic.grid_im_export, watts)
 
-    async def set_hems_target_electrical_watts(self, watts: int) -> None:
+    async def set_hems_target_electrical_power(self, watts: int) -> None:
         """Set the power a home energy manager wants the heat generator to draw."""
         await self.write(Photovoltaic.hems_target_electrical_power, watts)

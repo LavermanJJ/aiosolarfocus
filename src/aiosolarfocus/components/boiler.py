@@ -24,7 +24,7 @@ class Boiler(Component):
         """Set when this boiler is allowed to charge."""
         await self.write(Boiler.holding_mode, mode)
 
-    async def set_target_celsius(self, celsius: float) -> None:
+    async def set_target_temperature(self, celsius: float) -> None:
         """Set the hot water setpoint."""
         await self.write(Boiler.target_temperature, celsius)
 

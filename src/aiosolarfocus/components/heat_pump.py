@@ -62,10 +62,12 @@ class HeatPump(Component):
     #: VAMPAIR_STATE in enums.py for anything that wants to name it.
     vampair_state = code({_V20: 26, _V25: 30}, since=ApiVersion.V_20_110, doc="vampair Status")
 
-    #: 2408 is in the biomass boiler's block; both components read the same
-    #: outdoor sensor. Declared absolute rather than as offset 108 from 2300, so
-    #: the planner can see it is one address inside a range another component
-    #: already reads and fold the two together instead of spending a round trip.
+    #: 2408 is in the biomass boiler's block: both components read the same
+    #: outdoor sensor, and only one of them is ever present, so this always costs
+    #: a round trip of its own. Declared absolute rather than as offset 108 from
+    #: 2300 so that it is plainly one address elsewhere rather than the far end
+    #: of a 109-register block - which is how the predecessor sized its read
+    #: buffer for the heat pump, to hold twenty values.
     outdoor_temperature = celsius(2408, absolute=True, doc="Außentemperatur")
 
     evu_lock = flag(0, kind=HOLDING, access=READ_WRITE, signed=True, doc="EVU – Lock")
@@ -105,6 +107,6 @@ class HeatPump(Component):
         """Tell the heat pump what the SG Ready signal is."""
         await self.write(HeatPump.smart_grid, mode)
 
-    async def set_outdoor_celsius(self, celsius: float) -> None:
+    async def set_outdoor_temperature(self, celsius: float) -> None:
         """Feed the heat pump an outdoor temperature from a sensor of your own."""
         await self.write(HeatPump.outdoor_temperature_external, celsius)

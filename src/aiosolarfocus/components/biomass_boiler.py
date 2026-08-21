@@ -66,6 +66,6 @@ class BiomassBoiler(Component):
         """Tell the controller the pellet store has been refilled."""
         await self.write(BiomassBoiler.pellet_usage_reset, True)
 
-    async def set_outdoor_temperature(self, celsius_: float) -> None:
+    async def set_outdoor_temperature(self, celsius: float) -> None:
         """Feed the boiler an outdoor temperature from a sensor of your own."""
-        await self.write(BiomassBoiler.outdoor_temperature_external, celsius_)
+        await self.write(BiomassBoiler.outdoor_temperature_external, celsius)

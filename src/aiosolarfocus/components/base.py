@@ -13,15 +13,12 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from ..codec import decode, encode, words_to_raw
-from ..const import Access, ApiVersion, RegisterKind, Systems
+from ..const import Access, ApiVersion, RegisterKind, Systems, Write
 from ..exceptions import ReadOnlyRegisterError, SolarfocusError, UnsupportedRegisterError
 from ..registers import Register, RegisterInfo
 
 if TYPE_CHECKING:
     from ..layout import Layout
-
-#: One write on the wire: which table, which address, and the words to put there.
-Write = tuple[RegisterKind, int, tuple[int, ...]]
 
 
 class RegisterWriter(Protocol):

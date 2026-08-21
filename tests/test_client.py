@@ -1,0 +1,202 @@
+"""The client: what a refresh reads, and what it does when part of one fails."""
+
+from __future__ import annotations
+
+import pytest
+
+from aiosolarfocus.client import SolarfocusClient
+from aiosolarfocus.components import ComponentId
+from aiosolarfocus.components.boiler import Boiler
+from aiosolarfocus.components.heat_pump import HeatPump
+from aiosolarfocus.components.heating_circuit import HeatingCircuit
+from aiosolarfocus.config import ComponentKey, SolarfocusConfig
+from aiosolarfocus.const import ApiVersion, RegisterKind, Systems
+from aiosolarfocus.enums import HeatingCircuitCooling, HeatingCircuitMode
+from aiosolarfocus.exceptions import IllegalAddressError, SolarfocusConnectionError
+from aiosolarfocus.testing import FakeController
+
+pytestmark = pytest.mark.asyncio
+INPUT = RegisterKind.INPUT
+HOLDING = RegisterKind.HOLDING
+
+
+def vampair(**overrides: object) -> SolarfocusConfig:
+    settings: dict[str, object] = {
+        "host": "controller",
+        "system": Systems.VAMPAIR,
+        "api_version": ApiVersion.V_26_020,
+        "heating_circuits": 1,
+        "buffers": 1,
+        "boilers": 1,
+        "photovoltaic": True,
+    }
+    settings.update(overrides)
+    return SolarfocusConfig(**settings)  # type: ignore[arg-type]
+
+
+def build(config: SolarfocusConfig | None = None, values: dict[tuple[RegisterKind, int], int] | None = None) -> tuple[SolarfocusClient, FakeController]:
+    config = config or vampair()
+    fake = FakeController.for_config(config, values)
+    return SolarfocusClient(config, transport=fake), fake
+
+
+async def test_a_refresh_reads_every_component_and_decodes_it() -> None:
+    client, fake = build(values={(INPUT, 1100): 304, (INPUT, 2300): 285, (INPUT, 500): 512})
+    result = await client.update()
+
+    assert result.ok
+    assert client.heating_circuits[0].supply_temperature == 30.4
+    assert client.heat_pump.supply_temperature == 28.5
+    assert client.boilers[0].temperature == 51.2
+    assert result.round_trips == fake.round_trips
+
+
+async def test_a_refresh_costs_the_reads_the_plan_says_it_will() -> None:
+    client, fake = build()
+    await client.update()
+    assert fake.round_trips == client.read_plan.round_trips
+
+
+async def test_only_the_named_components_are_read() -> None:
+    client, fake = build()
+    await client.update(components=[ComponentId.BOILERS])
+    assert {read[1] for read in fake.reads} == {500, 32000}
+
+
+async def test_components_are_plain_attributes() -> None:
+    client, _ = build(vampair(heating_circuits=3))
+    assert len(client.heating_circuits) == 3
+    assert isinstance(client.heating_circuits[0], HeatingCircuit)
+    assert isinstance(client.heat_pump, HeatPump)
+    assert isinstance(client.boilers[0], Boiler)
+
+
+async def test_a_component_the_installation_does_not_have_reads_as_nothing() -> None:
+    """A system with no solar is an answer, not a mistake."""
+    client, _ = build(vampair(solar=0))
+    assert client.solar == []
+    assert client.biomass_boiler is None
+
+
+async def test_an_attribute_that_is_not_a_component_still_raises() -> None:
+    client, _ = build()
+    with pytest.raises(AttributeError, match="nonsense"):
+        _ = client.nonsense
+
+
+async def test_one_refused_range_fails_only_the_components_in_it() -> None:
+    """The predecessor returned on the first failing read, taking out the component.
+
+    Worse, its component manager returned on the first failing *instance*, so
+    buffer 3 failing hid buffer 4 failing.
+    """
+    config = vampair()
+    client, fake = build(config, values={(INPUT, 1100): 304})
+    fake.unmap(INPUT, 2300)
+
+    result = await client.update()
+
+    assert not result.ok
+    heat_pump = ComponentKey(ComponentId.HEAT_PUMP, 1)
+    assert set(result.failed) == {heat_pump}
+    assert isinstance(result.failed[heat_pump], IllegalAddressError)
+    # Everything else still updated.
+    assert client.heating_circuits[0].supply_temperature == 30.4
+    assert client.heating_circuits[0].available
+    assert not client.heat_pump.available
+
+
+async def test_a_failed_component_keeps_the_readings_it_had() -> None:
+    """Stale beats blank for a heating system: one dropped read should not empty a graph."""
+    config = vampair()
+    client, fake = build(config, values={(INPUT, 500): 512})
+    await client.update()
+    assert client.boilers[0].temperature == 51.2
+
+    fake.unmap(INPUT, 500)
+    result = await client.update()
+
+    assert not result.ok
+    assert client.boilers[0].temperature == 51.2
+    assert client.boilers[0].available is False
+    assert client.boilers[0].last_error is not None
+
+
+async def test_a_dropped_connection_raises_instead_of_failing_every_component() -> None:
+    """A socket dropping part way through says nothing about any component.
+
+    Reporting it per component would grey out an arbitrary tail of the heating
+    system - whichever components happened to come after it in the plan.
+    """
+    client, fake = build()
+    fake.fail_with = SolarfocusConnectionError("the socket dropped")
+    with pytest.raises(SolarfocusConnectionError):
+        await client.update()
+
+
+async def test_the_client_connects_itself_before_reading() -> None:
+    client, fake = build()
+    assert not client.connected
+    await client.update()
+    assert fake.connected
+
+
+async def test_the_context_manager_connects_and_disconnects() -> None:
+    config = vampair()
+    fake = FakeController.for_config(config)
+    async with SolarfocusClient(config, transport=fake) as client:
+        assert client.connected
+        await client.update()
+    assert not fake.connected
+
+
+async def test_a_write_reaches_the_controller_and_is_reflected_at_once() -> None:
+    client, fake = build()
+    await client.connect()
+    await client.heating_circuits[0].set_target_supply_temperature(45.0)
+
+    assert fake.writes == [(HOLDING, 32600, (450,))]
+    assert client.heating_circuits[0].target_supply_temperature == 45.0
+    # No re-read of the whole component: the predecessor's callers did that after
+    # every single write.
+    assert fake.round_trips == 0
+
+
+async def test_a_grouped_write_goes_out_as_one_group() -> None:
+    client, fake = build()
+    await client.connect()
+    await client.heating_circuits[0].set_operating_state(
+        mode=HeatingCircuitMode.AUTOMATIC,
+        cooling=HeatingCircuitCooling.HEATING,
+        target_supply_temperature=18.0,
+    )
+    assert fake.writes == [(HOLDING, 32600, (180,)), (HOLDING, 32602, (0,)), (HOLDING, 32603, (2,))]
+
+
+async def test_a_negative_value_is_written_as_the_controller_expects_it() -> None:
+    """The Home Assistant integration carried its own two's complement for this."""
+    client, fake = build()
+    await client.connect()
+    await client.photovoltaic.set_smart_meter(-1500)
+    assert fake.writes == [(HOLDING, 33407, (0xFA24,))]
+    assert client.photovoltaic.smart_meter == -1500
+
+
+async def test_an_open_sensor_channel_reads_as_nothing_rather_than_270_degrees() -> None:
+    client, _ = build(values={(INPUT, 1901): 2700})
+    await client.update()
+    assert client.buffers[0].bottom_temperature is None
+    assert client.buffers[0].raw(type(client.buffers[0]).bottom_temperature) == 2700
+
+
+async def test_the_snapshot_gives_diagnostics_everything_without_reaching_inside() -> None:
+    client, _ = build(values={(INPUT, 1100): 304})
+    await client.update()
+    snapshot = client.snapshot()
+    assert snapshot["heating_circuits.1"]["supply_temperature"] == {
+        "address": 1100,
+        "kind": "input",
+        "raw": 304,
+        "value": 30.4,
+        "unit": "°C",
+    }

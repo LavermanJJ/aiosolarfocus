@@ -30,6 +30,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
     "pytest-cov>=6.0",
+    "pytest-timeout>=2.3",
     "ruff>=0.9",
 ]
 
@@ -109,11 +110,18 @@ files = ["src", "tests"]
 module = "pymodbus.*"
 ignore_missing_imports = true
 
+# The server harness is the one place that drives pymodbus's own server, whose
+# constructors and shutdown are not annotated.
+[[tool.mypy.overrides]]
+module = "aiosolarfocus.testing.server"
+disallow_untyped_calls = false
+
 # --------------------------------------------------------------------------- #
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+timeout = 30
 filterwarnings = ["error"]
 
 [tool.coverage.run]

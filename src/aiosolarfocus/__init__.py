@@ -7,6 +7,9 @@ synchronous `pysolarfocus`.
 
 from importlib.metadata import PackageNotFoundError, version
 
+from .client import SolarfocusClient, UpdateResult
+from .components import ComponentId
+from .config import ComponentKey, SolarfocusConfig
 from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, Access, ApiVersion, RegisterKind, Systems
 from .enums import (
     BOILER_STATE,
@@ -37,6 +40,7 @@ from .exceptions import (
     ValueOutOfRangeError,
 )
 from .registers import RegisterInfo
+from .transport import ModbusTransport, Transport
 
 try:
     __version__ = version("aiosolarfocus")
@@ -53,6 +57,8 @@ __all__ = [
     "Access",
     "ApiVersion",
     "BufferMode",
+    "ComponentId",
+    "ComponentKey",
     "DeviceFailureError",
     "DomesticHotWaterMode",
     "HeatPumpSgReadyMode",
@@ -61,9 +67,12 @@ __all__ = [
     "HeatingCircuitMode",
     "IllegalAddressError",
     "IllegalValueError",
+    "ModbusTransport",
     "ReadOnlyRegisterError",
     "RegisterInfo",
     "RegisterKind",
+    "SolarfocusClient",
+    "SolarfocusConfig",
     "SolarfocusConfigError",
     "SolarfocusConnectionError",
     "SolarfocusError",
@@ -72,7 +81,9 @@ __all__ = [
     "SolarfocusTimeoutError",
     "SolarfocusValueError",
     "Systems",
+    "Transport",
     "UnsupportedRegisterError",
+    "UpdateResult",
     "ValueOutOfRangeError",
     "__version__",
     "describe",

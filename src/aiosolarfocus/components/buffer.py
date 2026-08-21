@@ -42,3 +42,28 @@ class Buffer(Component):
     external_top_temperature_x44 = celsius(0, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_external, doc="Puffertemperatur oben X44 extern")
     external_middle_temperature_x36 = celsius(1, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_external, doc="Puffertemperatur unten/Mitte X36 extern")
     external_bottom_temperature_x35 = celsius(2, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_external, doc="Puffertemperatur unten X35 extern")
+
+    async def set_external_top_temperature(self, celsius: float) -> None:
+        """Feed the buffer a top temperature from a sensor of your own."""
+        await self.write(Buffer.external_top_temperature_x44, celsius)
+
+    async def set_external_middle_temperature(self, celsius: float) -> None:
+        """Feed the buffer a middle temperature from a sensor of your own."""
+        await self.write(Buffer.external_middle_temperature_x36, celsius)
+
+    async def set_external_bottom_temperature(self, celsius: float) -> None:
+        """Feed the buffer a bottom temperature from a sensor of your own."""
+        await self.write(Buffer.external_bottom_temperature_x35, celsius)
+
+    async def set_external_temperatures(self, *, top: float | None = None, middle: float | None = None, bottom: float | None = None) -> None:
+        """Feed the buffer several external temperatures at once.
+
+        One hold of the transport lock, so the controller sees a consistent set
+        rather than a top from this minute and a bottom from the last.
+        """
+        values = {
+            Buffer.external_top_temperature_x44: top,
+            Buffer.external_middle_temperature_x36: middle,
+            Buffer.external_bottom_temperature_x35: bottom,
+        }
+        await self.write_many({register: value for register, value in values.items() if value is not None})

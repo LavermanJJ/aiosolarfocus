@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
-from aiosolarfocus.components.base import Component, RegisterWriter, Write
-from aiosolarfocus.const import ApiVersion, Systems
+from aiosolarfocus.components.base import Component, RegisterWriter
+from aiosolarfocus.const import ApiVersion, Systems, Write
 from aiosolarfocus.enums import HeatingCircuitMode
 from aiosolarfocus.layout import Layout
 from aiosolarfocus.registers import (

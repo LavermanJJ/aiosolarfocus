@@ -6,6 +6,7 @@ and compacting a block read that spans a gap - because those are what the read
 planner exists to avoid.
 """
 
+from .fake import FakeController
 from .spec import SpecRow, documented_addresses, load_spec, names_at
 
-__all__ = ["SpecRow", "documented_addresses", "load_spec", "names_at"]
+__all__ = ["FakeController", "SpecRow", "documented_addresses", "load_spec", "names_at"]
