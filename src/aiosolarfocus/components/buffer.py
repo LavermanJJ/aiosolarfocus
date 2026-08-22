@@ -23,8 +23,13 @@ class Buffer(Component):
 
     top_temperature = celsius(0, doc="Puffertemperatur oben")
     bottom_temperature = celsius(1, doc="Puffertemperatur unten")
-    #: The register document says of 1902: "therminator only".
-    x35_temperature = celsius(2, systems=frozenset({Systems.THERMINATOR, Systems.ECOTOP}), doc="Puffertemperatur X35")
+    #: "Buffer temperature X35 (therminator only)", says the document - and only
+    #: a therminator, so not an ecotop, which the predecessor's shared
+    #: `TherminatorBuffer` class had reading it too. An ecotop without the sensor
+    #: has 1902 unmapped, and a read spanning it comes back compacted rather than
+    #: padded: the pump reads the status, the status reads the Freigabeart, and
+    #: everything after shifts by one. See home-assistant-solarfocus issue #217.
+    x35_temperature = celsius(2, systems=frozenset({Systems.THERMINATOR}), doc="Puffertemperatur X35")
 
     pump = flag({ApiVersion.V_20_110: 2, ApiVersion.V_25_030: 3}, signed=True, doc="Puffer – Ladepumpe")
     state = code({ApiVersion.V_20_110: 3, ApiVersion.V_25_030: 4}, doc="Pufferstatus")

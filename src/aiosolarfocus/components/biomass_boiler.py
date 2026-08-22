@@ -6,9 +6,18 @@ from ..const import ApiVersion, Systems, every_system_but
 from ..registers import HOLDING, READ_WRITE, celsius, code, flag, percent, tenths, unscaled
 from .base import Component
 
-#: The ecotop is the one biomass boiler without a chimney sweep function, a log
-#: wood input or a pellet store to reset.
+#: The ecotop is the one biomass boiler without a chimney sweep function or a
+#: pellet store to reset.
 _NOT_ECOTOP = every_system_but(Systems.ECOTOP)
+
+#: Registers 2409 and 2412 belong to a therminator, 2411 to an octoplus, and the
+#: document says so in their names. Reading across them on a system that has
+#: neither is what put a Pellet Elegance's return flow temperature one register
+#: out of step: 2409 and 2413 are unmapped there, and a read spanning them comes
+#: back compacted rather than padded, so every value after the gap shifts into
+#: the wrong name. See home-assistant-solarfocus issue #217 and docs/protocol.md.
+_THERMINATOR = frozenset({Systems.THERMINATOR})
+_OCTOPLUS = frozenset({Systems.OCTOPLUS})
 
 
 class BiomassBoiler(Component):
@@ -22,7 +31,8 @@ class BiomassBoiler(Component):
     cleaning = percent(6, doc="Kesselreinigung")
     ash_container = percent(7, doc="Ascheboxfüllstand")
     outdoor_temperature = celsius(8, doc="Außentemperatur")
-    boiler_operating_mode = code(9, signed=True, doc="Kesselbetriebsart therminator")
+    #: The document calls this one therminator, and only a therminator maps it.
+    boiler_operating_mode = code(9, signed=True, systems=_THERMINATOR, doc="Kesselbetriebsart therminator")
 
     #: 2410 is two different measurements at one address, and on one system it is
     #: none. The register document splits it three ways: the octoplus reads the
@@ -31,11 +41,14 @@ class BiomassBoiler(Component):
     #: Declaring both names with disjoint `systems` says that once; declaring
     #: them without would have a therminator reporting whatever an unassigned
     #: register happens to hold, and would read one address twice.
-    octoplus_buffer_temperature_bottom = celsius(10, systems=frozenset({Systems.OCTOPLUS}), doc="SpeichertemperaturUnten octoplus")
+    octoplus_buffer_temperature_bottom = celsius(10, systems=_OCTOPLUS, doc="SpeichertemperaturUnten octoplus")
     return_temperature = celsius(10, systems=frozenset({Systems.ECOTOP, Systems.PELLETELEGANCE}), doc="Rücklauftemperatur")
-    octoplus_buffer_temperature_top = celsius(11, doc="SpeichertemperaturOben octoplus")
+    octoplus_buffer_temperature_top = celsius(11, systems=_OCTOPLUS, doc="SpeichertemperaturOben octoplus")
 
-    log_wood = flag(12, since=ApiVersion.V_22_090, systems=_NOT_ECOTOP, doc="Stückholz therminator")
+    #: A log wood input is a therminator thing. The predecessar gated this as
+    #: "not an ecotop" only because it shared an `if` with the sweep function,
+    #: which every non-ecotop boiler does have.
+    log_wood = flag(12, since=ApiVersion.V_22_090, systems=_THERMINATOR, doc="Stückholz therminator")
 
     pellet_usage_last_fill = tenths(14, width=2, signed=False, unit="kg", since=ApiVersion.V_23_010, doc="Pelletverbrauch seit letzter Lagerraumbefüllung")
     pellet_usage_total = tenths(16, width=2, signed=False, unit="kg", since=ApiVersion.V_23_010, doc="Pelletverbrauch gesamt seit Update auf V21.050 oder jünger")

@@ -99,6 +99,15 @@ The setters live on the component.
 - A single failing read failed a whole component; and a failing instance of a
   multi-instance component hid the ones after it.
 - Negative writes were the caller's problem.
+- **Registers belonging to one system were read on all of them.** `2409`
+  (Kesselbetriebsart, therminator), `2411` (Speichertemperatur oben, octoplus),
+  `2412` (Stückholz, therminator) and buffer `1902` (X35, therminator) were read
+  on systems the document does not give them to. A Pellet Elegance maps neither
+  `2409` nor `2413`, so the boiler read spanned them and came back compacted:
+  the return flow temperature reported 270.0 °C where the sensor said 22.1 °C,
+  and the buffer's pump reported the status register. See
+  home-assistant-solarfocus issue #217. A test now holds every register against
+  the system the document names in its own description.
 
 ## Deliberately *not* changed
 

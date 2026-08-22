@@ -15,3 +15,6 @@ First cut. Nothing has been released yet.
 - Optional detection, ported from `pysolarfocus`'s `detect-configuration` branch.
 - A blocking facade, a `python -m aiosolarfocus` command line, and a fake
   controller shipped in the wheel for downstream tests.
+- Registers the document gives to one system are read only on that system, so a
+  pellet boiler no longer reads across the unmapped `2409`/`2413` and misreports
+  everything after them (home-assistant-solarfocus#217).
