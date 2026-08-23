@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import ClassVar
 
-from ..const import ApiVersion, Systems
+from ..const import NOT_WIRED_PERCENT, ApiVersion, Systems
 from ..enums import HeatingCircuitCooling, HeatingCircuitHeatingMode, HeatingCircuitMode
 from ..registers import HOLDING, READ_WRITE, celsius, code, enum_, flag, percent
 from .base import Component
@@ -31,7 +31,7 @@ class HeatingCircuit(Component):
 
     supply_temperature = celsius(0, doc="Vorlauftemperatur")
     room_temperature = celsius(1, doc="Raumtemperatur")
-    humidity = percent(2, scale=0.1, doc="Feuchte")
+    humidity = percent(2, scale=0.1, sentinels=NOT_WIRED_PERCENT, doc="Feuchte")
     limit_thermostat = flag(3, doc="Begrenzungsthermostat offen/geschlossen")
 
     circulator_pump = flag({ApiVersion.V_20_110: 4, ApiVersion.V_25_030: 5}, doc="Heizkreispumpe Ein/Aus")

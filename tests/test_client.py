@@ -40,6 +40,19 @@ def build(config: SolarfocusConfig | None = None, values: dict[tuple[RegisterKin
     return SolarfocusClient(config, transport=fake), fake
 
 
+def biomass(system: Systems = Systems.PELLETELEGANCE, **overrides: object) -> SolarfocusConfig:
+    settings: dict[str, object] = {
+        "host": "controller",
+        "system": system,
+        "api_version": ApiVersion.V_26_020,
+        "heating_circuits": 1,
+        "buffers": 1,
+        "biomass_boiler": True,
+    }
+    settings.update(overrides)
+    return SolarfocusConfig(**settings)  # type: ignore[arg-type]
+
+
 async def test_a_refresh_reads_every_component_and_decodes_it() -> None:
     client, fake = build(values={(INPUT, 1100): 304, (INPUT, 2300): 285, (INPUT, 500): 512})
     result = await client.update()
@@ -187,6 +200,39 @@ async def test_an_open_sensor_channel_reads_as_nothing_rather_than_270_degrees()
     await client.update()
     assert client.buffers[0].bottom_temperature is None
     assert client.buffers[0].raw(type(client.buffers[0]).bottom_temperature) == 2700
+
+
+async def test_an_unwired_humidity_channel_reads_as_nothing_rather_than_negative() -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    Two real Pellet Elegance controllers read 65535 here and had it decode to
+    -0.1%, a percentage with no legitimate negative reading the way -0.1 degC
+    is a legitimate outdoor one.
+    """
+    client, _ = build(biomass(), values={(INPUT, 1102): 65535})
+    await client.update()
+    assert client.heating_circuits[0].humidity is None
+    assert client.heating_circuits[0].raw(type(client.heating_circuits[0]).humidity) == -1
+
+
+async def test_an_unwired_cleaning_sensor_reads_as_nothing_rather_than_negative() -> None:
+    """Regression for home-assistant-solarfocus#237: the same 65535 leak, on a boiler's cleaning percentage."""
+    client, _ = build(biomass(), values={(INPUT, 2406): 65535})
+    await client.update()
+    assert client.biomass_boiler is not None
+    assert client.biomass_boiler.cleaning is None
+
+
+async def test_an_unwired_ash_container_reads_as_nothing_rather_than_minus_999() -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    A real ecotop read -999 here, a sentinel this register does not share with
+    anything else in the document.
+    """
+    client, _ = build(biomass(Systems.ECOTOP), values={(INPUT, 2407): 2**16 - 999})
+    await client.update()
+    assert client.biomass_boiler is not None
+    assert client.biomass_boiler.ash_container is None
 
 
 async def test_the_snapshot_gives_diagnostics_everything_without_reaching_inside() -> None:

@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from ..const import ApiVersion, Systems, every_system_but
+from ..const import NOT_WIRED_PERCENT, ApiVersion, Systems, every_system_but
 from ..registers import HOLDING, READ_WRITE, celsius, code, flag, percent, tenths, unscaled
 from .base import Component
 
 #: The ecotop is the one biomass boiler without a chimney sweep function or a
 #: pellet store to reset.
 _NOT_ECOTOP = every_system_but(Systems.ECOTOP)
+
+#: Ascheboxfüllstand's own "not present" marker: -999, seen on a real ecotop in
+#: home-assistant-solarfocus#237. Nothing else in the document uses -999 this
+#: way, so it is not part of the wider NOT_WIRED_PERCENT - just this register's
+#: unsigned reading, the way sentinels are matched.
+_ASH_CONTAINER_NOT_PRESENT = frozenset({2**16 - 999})
 
 #: Registers 2409 and 2412 belong to a therminator, 2411 to an octoplus, and the
 #: document says so in their names. Reading across them on a system that has
@@ -28,8 +34,8 @@ class BiomassBoiler(Component):
     time_of_operation_at_maintenance = unscaled(2, width=2, unit="min", doc="Betriebsminuten zum Wartungszeitpunkt")
     message_number = unscaled(4, doc="Nachrichtennummer")
     door_contact = flag(5, signed=True, doc="Türkontakt offen/geschlossen")
-    cleaning = percent(6, doc="Kesselreinigung")
-    ash_container = percent(7, doc="Ascheboxfüllstand")
+    cleaning = percent(6, sentinels=NOT_WIRED_PERCENT, doc="Kesselreinigung")
+    ash_container = percent(7, sentinels=_ASH_CONTAINER_NOT_PRESENT, doc="Ascheboxfüllstand")
     outdoor_temperature = celsius(8, doc="Außentemperatur")
     #: The document calls this one therminator, and only a therminator maps it.
     boiler_operating_mode = code(9, signed=True, systems=_THERMINATOR, doc="Kesselbetriebsart therminator")

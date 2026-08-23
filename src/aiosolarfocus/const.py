@@ -22,6 +22,13 @@ MAX_REGISTERS_PER_READ = 120
 #: Detection is where -1 counts as evidence that a channel is not configured.
 OPEN_CHANNEL = frozenset({1300, 2700})
 
+#: OPEN_CHANNEL's counterpart for a percent register. -0.1% has no equivalent
+#: to -0.1 degC on a frosty night - a percentage is never legitimately negative
+#: - so unlike OPEN_CHANNEL, 65535 belongs in this one. Found leaking through as
+#: -0.1% indoor humidity and -1% boiler cleaning on real controllers in
+#: home-assistant-solarfocus#237.
+NOT_WIRED_PERCENT = frozenset({65535})
+
 
 class Systems(StrEnum):
     """The heating systems this library knows how to address.
