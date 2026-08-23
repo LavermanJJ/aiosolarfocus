@@ -40,6 +40,19 @@ def build(config: SolarfocusConfig | None = None, values: dict[tuple[RegisterKin
     return SolarfocusClient(config, transport=fake), fake
 
 
+def biomass(system: Systems = Systems.PELLETELEGANCE, **overrides: object) -> SolarfocusConfig:
+    settings: dict[str, object] = {
+        "host": "controller",
+        "system": system,
+        "api_version": ApiVersion.V_26_020,
+        "heating_circuits": 1,
+        "buffers": 1,
+        "biomass_boiler": True,
+    }
+    settings.update(overrides)
+    return SolarfocusConfig(**settings)  # type: ignore[arg-type]
+
+
 async def test_a_refresh_reads_every_component_and_decodes_it() -> None:
     client, fake = build(values={(INPUT, 1100): 304, (INPUT, 2300): 285, (INPUT, 500): 512})
     result = await client.update()
@@ -187,6 +200,63 @@ async def test_an_open_sensor_channel_reads_as_nothing_rather_than_270_degrees()
     await client.update()
     assert client.buffers[0].bottom_temperature is None
     assert client.buffers[0].raw(type(client.buffers[0]).bottom_temperature) == 2700
+
+
+async def test_an_unwired_humidity_channel_reads_as_nothing_rather_than_negative() -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    Two real Pellet Elegance controllers read 65535 here and had it decode to
+    -0.1%, a percentage with no legitimate negative reading the way -0.1 degC
+    is a legitimate outdoor one.
+    """
+    client, _ = build(biomass(), values={(INPUT, 1102): 65535})
+    await client.update()
+    assert client.heating_circuits[0].humidity is None
+    assert client.heating_circuits[0].raw(type(client.heating_circuits[0]).humidity) == -1
+
+
+@pytest.mark.parametrize("address", [2406, 2407])
+@pytest.mark.parametrize(("raw", "marker"), [(2**16 - 1, "-1"), (2**16 - 999, "-999")])
+async def test_an_absent_boiler_percentage_reads_as_nothing_whichever_marker_it_is_given(address: int, raw: int, marker: str) -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    Both markers on both registers, because the controller picks the marker and
+    the register only decides which sensor is missing: two Pellet Elegance
+    controllers published -1% cleaning (2406) with a real ash container, and a
+    Therminator 2 - configured as an ecotop, which is how its dump is filed -
+    published -999% ash container (2407) with a real cleaning.
+    """
+    client, _ = build(biomass(), values={(INPUT, address): raw})
+    await client.update()
+    assert client.biomass_boiler is not None
+    register = type(client.biomass_boiler).cleaning if address == 2406 else type(client.biomass_boiler).ash_container
+    assert client.biomass_boiler.value_of(register) is None, f"{marker} at {address} leaked through"
+    assert client.biomass_boiler.raw(register) == int(marker)
+
+
+async def test_an_external_outdoor_temperature_nobody_wrote_reads_as_nothing() -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    All three controllers published -999.9 degC from holding 33406, twenty
+    times below the -50 degC the same register refuses to be written past.
+    """
+    client, _ = build(biomass(), values={(HOLDING, 33406): 2**16 - 9999})
+    await client.update()
+    assert client.biomass_boiler is not None
+    assert client.biomass_boiler.outdoor_temperature_external is None
+    assert client.biomass_boiler.raw(type(client.biomass_boiler).outdoor_temperature_external) == -9999
+
+
+async def test_a_flag_the_controller_left_unset_reads_as_nothing_rather_than_true() -> None:
+    """Regression for home-assistant-solarfocus#237.
+
+    Two controllers read -1 from holding 32003, and `bool(-1)` reported a
+    circulation request that nobody had made.
+    """
+    client, _ = build(biomass(boilers=1), values={(HOLDING, 32003): 2**16 - 1})
+    await client.update()
+    assert client.boilers[0].circulation is None
+    assert client.boilers[0].raw(Boiler.circulation) == -1
 
 
 async def test_the_snapshot_gives_diagnostics_everything_without_reaching_inside() -> None:

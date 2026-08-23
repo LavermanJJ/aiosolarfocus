@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from ..const import ApiVersion, Systems, every_system_but
+from ..const import NOT_WIRED_PERCENT, OPEN_CHANNEL, ApiVersion, Systems, every_system_but
 from ..registers import HOLDING, READ_WRITE, celsius, code, flag, percent, tenths, unscaled
 from .base import Component
 
 #: The ecotop is the one biomass boiler without a chimney sweep function or a
 #: pellet store to reset.
 _NOT_ECOTOP = every_system_but(Systems.ECOTOP)
+
+#: What Außentemperatur extern reads before anybody has written one: -9999,
+#: which the tenths a temperature is read in turn into -999.9 degC - twenty
+#: times below the -50 degC floor this same register refuses to be written past.
+#: All three controllers in home-assistant-solarfocus#237 published it as a
+#: reading. The other two "extern" registers are the heating circuit's and read
+#: a plain 0, so this stays here rather than going next to OPEN_CHANNEL.
+_NO_EXTERNAL_TEMPERATURE = frozenset({2**16 - 9999})
 
 #: Registers 2409 and 2412 belong to a therminator, 2411 to an octoplus, and the
 #: document says so in their names. Reading across them on a system that has
@@ -28,8 +36,12 @@ class BiomassBoiler(Component):
     time_of_operation_at_maintenance = unscaled(2, width=2, unit="min", doc="Betriebsminuten zum Wartungszeitpunkt")
     message_number = unscaled(4, doc="Nachrichtennummer")
     door_contact = flag(5, signed=True, doc="Türkontakt offen/geschlossen")
-    cleaning = percent(6, doc="Kesselreinigung")
-    ash_container = percent(7, doc="Ascheboxfüllstand")
+    #: Both markers on both, because #237 has each register absent on one
+    #: controller and read on another: a Pellet Elegance published -1% cleaning
+    #: with a real ash container, a Therminator -999% ash container with a real
+    #: cleaning. The document gives both as 0-100%.
+    cleaning = percent(6, sentinels=NOT_WIRED_PERCENT, doc="Kesselreinigung")
+    ash_container = percent(7, sentinels=NOT_WIRED_PERCENT, doc="Ascheboxfüllstand")
     outdoor_temperature = celsius(8, doc="Außentemperatur")
     #: The document calls this one therminator, and only a therminator maps it.
     boiler_operating_mode = code(9, signed=True, systems=_THERMINATOR, doc="Kesselbetriebsart therminator")
@@ -58,7 +70,9 @@ class BiomassBoiler(Component):
     residual_oxygen_level = percent(21, scale=0.1, signed=False, since=ApiVersion.V_25_020, doc="Restsauerstoffgehalt")
     return_flow_booster_pump = flag(22, since=ApiVersion.V_25_020, doc="Rücklaufanhebungspumpe Ein/Aus")
 
-    outdoor_temperature_external = celsius(6, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_23_010, bounds=(-50.0, 60.0), doc="Außentemperatur extern")
+    outdoor_temperature_external = celsius(
+        6, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_23_010, bounds=(-50.0, 60.0), sentinels=OPEN_CHANNEL | _NO_EXTERNAL_TEMPERATURE, doc="Außentemperatur extern"
+    )
     sweep_function_start_stop = flag(10, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_NOT_ECOTOP, signed=True, doc="Kaminkehrerfunktion Start/Stopp")
     sweep_function_extend = flag(11, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_NOT_ECOTOP, signed=True, doc="Kaminkehrer Messung verlängern")
     pellet_usage_reset = flag(12, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_23_010, systems=_NOT_ECOTOP, signed=True, doc="Pelletvorratslagerraum befüllt")

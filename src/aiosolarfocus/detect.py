@@ -52,6 +52,28 @@ HEATING_CIRCUIT_DISABLED = 7
 #: from 200, where the first is again the one meaning the component is not there.
 NOT_PRESENT = frozenset({0, 200})
 
+#: A buffer temperature this high is not a real reading: no octoplus buffer
+#: runs anywhere near 100 degC. NO_SENSOR's exact sentinels are not the whole
+#: story here either - a real Pellet Elegance read 150.0 degC at this same
+#: address (home-assistant-solarfocus#237), well past NO_SENSOR but just as far
+#: from anything a buffer sensor reports.
+IMPLAUSIBLE_BUFFER_TEMPERATURE = 1000
+
+#: Kaminkehrerfunktion Start/Stopp - a function every biomass boiler but the
+#: ecotop has (`_NOT_ECOTOP` in components/biomass_boiler.py). Read for
+#: existence rather than content, so it is unaffected by 2410 and 2411 being
+#: unreliable, but the two directions are not equally strong and this module's
+#: own preamble says why: a refusal is good evidence for an ecotop, while a
+#: mapped register is weak evidence against one, because the 26.020 controller
+#: this was written against mapped every documented register bar the X35 sensors
+#: of the buffers it did not have. No dump settles which way an ecotop goes -
+#: none of the three in #237 is one. So this is the tie-break between the two
+#: models nothing else separates rather than a reading of the model, and it
+#: breaks towards the pellet elegance: guessing that costs an ecotop a sweep
+#: button it will refuse, where guessing the other way costs a pellet elegance
+#: the sweep and pellet-store-reset entities it does have.
+CHIMNEY_SWEEP_HOLDING = 33410
+
 #: Registers a version introduced, each picked to be there whatever the
 #: installation looks like - the fourth instance of a component, or a setting -
 #: so that the version they date the controller to does not depend on what is
@@ -264,15 +286,28 @@ class _Prober:
 
         # A heat pump is a vampair whatever else is on the controller, because
         # that is the component the library builds for it. Which biomass boiler
-        # it is has only been reasoned from the specification - no therminator,
-        # ecotop or octoplus was available to check it against - so the values
-        # it rests on are in the evidence for an owner to argue with.
+        # it is has only been reasoned from the specification and, since
+        # home-assistant-solarfocus#237, three Pellet Elegance and one
+        # Therminator dump - so the values it rests on are in the evidence for
+        # an owner to argue with.
         if has_heat_pump or not has_biomass_boiler:
             system = Systems.VAMPAIR
-        elif _live(octoplus_bottom) or _live(octoplus_top):
-            # 2410 and 2411 are the buffer of an octoplus; on the other Sigmatek
-            # boilers 2410 is a return temperature and the therminator leaves
-            # both unused.
+        elif _plausible_buffer(octoplus_top):
+            # Only 2411 is trusted here. 2410 is the same register an ecotop and
+            # a pellet elegance read their return flow temperature from, so a
+            # live reading there is evidence of a biomass boiler, not of an
+            # octoplus specifically - all three Pellet Elegance dumps from #237
+            # had a live return flow at 2410 and were detected as an octoplus
+            # for exactly that reason.
+            #
+            # The cost of dropping 2410 from the test: an octoplus whose buffer
+            # top sensor is not reporting - unconfigured, open, or reading
+            # something no buffer reads - has nothing left to identify it and
+            # falls through to the pellet elegance guess below, which relabels
+            # 2410 as a return flow and drops both buffer temperatures. That is
+            # the sensor of an integrated buffer, so it should be as configured
+            # as the boiler is; the values it was judged on are in the evidence
+            # either way.
             system = Systems.OCTOPLUS
         elif _live(log_wood) or (operating_mode is not None and operating_mode in _THERMINATOR_LOG_MODES):
             # Kesselbetriebsart 1-3 all burn logs, which only a therminator does.
@@ -280,10 +315,20 @@ class _Prober:
             # reads, so it is not taken as evidence of anything.
             system = Systems.THERMINATOR
         else:
-            # The boiler that needs the least of the library: no log wood, no
-            # sweep function, no pellet store reset. Wrong here costs a handful
-            # of entities rather than a misread register.
-            system = Systems.ECOTOP
+            # Neither octoplus nor an actively-logging therminator - which
+            # leaves ecotop and pellet elegance, indistinguishable by anything
+            # read so far. The chimney sweep function is the only thing that
+            # separates them at all, and `CHIMNEY_SWEEP_HOLDING` says how far
+            # that goes: a refused register makes this an ecotop, a mapped one
+            # leaves the pellet elegance as the safer of two guesses rather
+            # than establishing it. A therminator idling in log mode 0 (#237's
+            # ragesoft) lands here too and reads as a pellet elegance rather
+            # than the ecotop this used to default to - wrong either way, but
+            # the pellet elegance guess is the one that leaves the sweep and
+            # pellet-store-reset entities in place.
+            has_chimney_sweep = await self._exists(HOLDING, CHIMNEY_SWEEP_HOLDING)
+            self._evidence["chimney_sweep_holding"] = has_chimney_sweep
+            system = Systems.PELLETELEGANCE if has_chimney_sweep else Systems.ECOTOP
 
         return has_heat_pump, has_biomass_boiler, system
 
@@ -372,6 +417,19 @@ class _Prober:
 def _live(value: int | None) -> bool:
     """Whether a register is reporting a measurement rather than an empty channel."""
     return value is not None and value != 0 and value not in NO_SENSOR
+
+
+def _plausible_buffer(value: int | None) -> bool:
+    """Whether a reading could be an octoplus buffer sensor reporting.
+
+    `_live` and a ceiling, and the sign taken off first: `_value` hands back the
+    unsigned word, so a reading below zero - not a buffer either - would sail
+    past a ceiling test as a number in the sixty thousands rather than fail it.
+    """
+    if value is None or not _live(value):
+        return False
+    tenths = value - (1 << 16) if value >= (1 << 15) else value
+    return 0 < tenths < IMPLAUSIBLE_BUFFER_TEMPERATURE
 
 
 def _configured(value: int | None) -> bool:

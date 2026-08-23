@@ -22,6 +22,28 @@ MAX_REGISTERS_PER_READ = 120
 #: Detection is where -1 counts as evidence that a channel is not configured.
 OPEN_CHANNEL = frozenset({1300, 2700})
 
+#: OPEN_CHANNEL's counterpart for a percent register. -0.1% has no equivalent
+#: to -0.1 degC on a frosty night - the document gives every one of these
+#: registers as 0-100% - so unlike OPEN_CHANNEL, the negative markers belong in
+#: this one. There are two, -1 and -999, and which one a controller writes is a
+#: fact about the controller rather than about the register: in
+#: home-assistant-solarfocus#237 two Pellet Elegance controllers marked an
+#: absent cleaning sensor with -1 and read the ash container fine, while a
+#: Therminator marked an absent ash container with -999 and read the cleaning
+#: fine. So every percent register that can be absent takes both, rather than
+#: each taking whichever marker it happened to be seen with.
+#:
+#: Written as the unsigned readings they are matched against, the way
+#: `codec.decode` matches sentinels.
+NOT_WIRED_PERCENT = frozenset({2**16 - 1, 2**16 - 999})
+
+#: What a 0/1 register reads when the controller has nothing to put there: -1.
+#: `bool()` makes that True, which is how holding 32003 reported a circulation
+#: request nobody had made on two of the three controllers in #237. Nothing
+#: documented as a flag is ever legitimately 0xFFFF, so a flag decodes it to
+#: None instead.
+NOT_SET_FLAG = frozenset({2**16 - 1})
+
 
 class Systems(StrEnum):
     """The heating systems this library knows how to address.
