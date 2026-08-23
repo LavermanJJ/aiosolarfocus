@@ -160,6 +160,33 @@ async def test_an_implausibly_hot_buffer_top_is_not_told_as_an_octoplus() -> Non
     assert detection.system is not Systems.OCTOPLUS
 
 
+async def test_a_buffer_top_below_zero_is_not_told_as_an_octoplus() -> None:
+    """2411 comes back as the unsigned word, so a negative reading is a large one.
+
+    Nothing an octoplus buffer does, and it must fail the ceiling rather than
+    sail past it as a number in the sixty thousands.
+    """
+    values = {(INPUT, 2400): 650, (INPUT, 2410): 480, (INPUT, 2411): 2**16 - 36, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values))
+    assert detection.system is not Systems.OCTOPLUS
+
+
+@pytest.mark.parametrize("top", [0, 1300, 2700])
+async def test_an_octoplus_whose_buffer_top_says_nothing_cannot_be_told_apart(top: int) -> None:
+    """A known limitation, recorded rather than fixed.
+
+    2411 is the only register that identifies an octoplus - 2410 is a return
+    flow on the other pellet boilers - so an octoplus whose buffer top sensor is
+    unconfigured or open has nothing left to identify it and reads as the pellet
+    elegance the fall-through guesses. The values it was judged on are in the
+    evidence, which is what an owner has to argue with.
+    """
+    values = {(INPUT, 2400): 650, (INPUT, 2410): 480, (INPUT, 2411): top, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values))
+    assert detection.system is Systems.PELLETELEGANCE
+    assert detection.evidence["biomass_boiler"]["octoplus_buffer"] == [480, top]
+
+
 async def test_a_therminator_is_told_by_its_log_wood() -> None:
     values = {(INPUT, 2400): 650, (INPUT, 2412): 1, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
     detection = await detect_through(await controller(values))
@@ -187,7 +214,13 @@ async def test_an_idle_operating_mode_falls_through_to_the_chimney_sweep_check(m
 
 
 async def test_the_chimney_sweep_register_separates_an_ecotop_from_a_pellet_elegance() -> None:
-    """Every biomass boiler but the ecotop has the chimney sweep function."""
+    """The chimney sweep function is on every biomass boiler but the ecotop.
+
+    A refused register is the only firm evidence for an ecotop there is. The
+    other direction is the tie-break `CHIMNEY_SWEEP_HOLDING` describes rather
+    than a reading of the model: a controller that maps the register has not
+    said it is a pellet elegance, only that nothing rules one out.
+    """
     values = {(INPUT, 2400): 650, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
     detection = await detect_through(await controller(values, absent=[(HOLDING, 33410)]))
     assert detection.system is Systems.ECOTOP
@@ -198,10 +231,12 @@ async def test_the_chimney_sweep_register_separates_an_ecotop_from_a_pellet_eleg
 
 #: The three real Pellet Elegance `detect --evidence` reports from
 #: home-assistant-solarfocus#237, transcribed from the biomass_boiler evidence
-#: each one printed. Every one of them was detected as an octoplus before this
-#: file's fix, purely because 2410 had a live return flow temperature.
+#: each one printed and named for the owner who posted it - the firmware each
+#: one is on is in the issue, and is not what these turn on. Every one of them
+#: was detected as an octoplus before this file's fix, purely because 2410 had a
+#: live return flow temperature.
 _PELLET_ELEGANCE_REPORTS = {
-    "RobertoCravallo, firmware 23.080": {
+    "RobertoCravallo": {
         (INPUT, 2400): 227,  # temperature
         (INPUT, 2401): 6,  # status
         (INPUT, 2410): 218,  # octoplus_buffer bottom / return temperature
@@ -211,7 +246,7 @@ _PELLET_ELEGANCE_REPORTS = {
         (INPUT, 2416): 1,
         (INPUT, 2417): 58872,  # pellet_usage_total = 124408
     },
-    "CarlosDerSeher, firmware 25.030": {
+    "CarlosDerSeher": {
         (INPUT, 2400): 211,
         (INPUT, 2401): 6,
         (INPUT, 2409): 0,  # operating_mode
@@ -222,7 +257,7 @@ _PELLET_ELEGANCE_REPORTS = {
         (INPUT, 2416): 0,
         (INPUT, 2417): 54186,  # pellet_usage_total = 54186
     },
-    "Nugman, firmware 25.110": {
+    "Nugman": {
         (INPUT, 2400): 255,
         (INPUT, 2401): 0,
         (INPUT, 2409): 0,
