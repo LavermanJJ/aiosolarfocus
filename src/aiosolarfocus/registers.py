@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, overload
 
-from .const import OPEN_CHANNEL, Access, ApiVersion, RegisterKind, Systems
+from .const import NOT_SET_FLAG, OPEN_CHANNEL, Access, ApiVersion, RegisterKind, Systems
 
 if TYPE_CHECKING:
     from .components.base import Component
@@ -290,9 +290,15 @@ def percent(at: int | Mapping[ApiVersion, int], **kwargs: Any) -> Register[float
 
 
 def flag(at: int | Mapping[ApiVersion, int], **kwargs: Any) -> Register[bool]:
-    """A register that is only ever 0 or 1."""
+    """A register that is only ever 0 or 1.
+
+    0xFFFF decodes to None rather than to True. It is not a third state the
+    document defines - it is what a flag reads when the controller has nothing
+    to put there - and `bool(-1)` would report it as set.
+    """
     kwargs.setdefault("kind", INPUT)
     kwargs.setdefault("signed", False)
+    kwargs.setdefault("sentinels", NOT_SET_FLAG)
     kwargs.setdefault("decode_fn", bool)
     kwargs.setdefault("encode_fn", int)
     return Register[bool](at=at, **kwargs)
