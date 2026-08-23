@@ -138,24 +138,134 @@ async def test_an_octoplus_is_told_by_its_buffer() -> None:
     assert detection.has_biomass_boiler
 
 
+async def test_a_live_return_temperature_alone_is_not_told_as_an_octoplus() -> None:
+    """2410 is also an ecotop's and a pellet elegance's return flow temperature.
+
+    Regression for home-assistant-solarfocus#237: three real Pellet Elegance
+    dumps were detected as an octoplus purely because 2410 read a live
+    temperature, which every biomass boiler with a live return flow does.
+    """
+    values = {(INPUT, 2400): 650, (INPUT, 2410): 480, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values))
+    assert detection.system is not Systems.OCTOPLUS
+
+
+async def test_an_implausibly_hot_buffer_top_is_not_told_as_an_octoplus() -> None:
+    """Not one of NO_SENSOR's exact sentinels, but just as far from a real reading.
+
+    A real Pellet Elegance in #237 read 150.0 degC at 2411.
+    """
+    values = {(INPUT, 2400): 650, (INPUT, 2410): 480, (INPUT, 2411): 1500, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values))
+    assert detection.system is not Systems.OCTOPLUS
+
+
 async def test_a_therminator_is_told_by_its_log_wood() -> None:
     values = {(INPUT, 2400): 650, (INPUT, 2412): 1, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
     detection = await detect_through(await controller(values))
     assert detection.system is Systems.THERMINATOR
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected"), [(0, Systems.ECOTOP), (1, Systems.THERMINATOR), (2, Systems.THERMINATOR), (3, Systems.THERMINATOR), (4, Systems.ECOTOP), (5, Systems.ECOTOP)]
-)
-async def test_the_boiler_operating_mode_separates_a_therminator_from_an_ecotop(mode: int, expected: Systems) -> None:
-    """Modes 1 to 3 all burn logs, which only a therminator does.
-
-    Mode 0 is logs as well, but it is also what an unset register reads, so it
-    is not taken as evidence of anything.
-    """
+@pytest.mark.parametrize(("mode", "expected"), [(1, Systems.THERMINATOR), (2, Systems.THERMINATOR), (3, Systems.THERMINATOR)])
+async def test_the_boiler_operating_mode_separates_a_therminator_from_the_rest(mode: int, expected: Systems) -> None:
+    """Modes 1 to 3 all burn logs, which only a therminator does."""
     values = {(INPUT, 2400): 650, (INPUT, 2409): mode, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
     detection = await detect_through(await controller(values))
     assert detection.system is expected
+
+
+@pytest.mark.parametrize("mode", [0, 4, 5])
+async def test_an_idle_operating_mode_falls_through_to_the_chimney_sweep_check(mode: int) -> None:
+    """Mode 0 is logs too, but it is also what an unset register reads.
+
+    Modes 4 and 5 are unassigned. None of the three is taken as therminator
+    evidence on their own.
+    """
+    values = {(INPUT, 2400): 650, (INPUT, 2409): mode, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values))
+    assert detection.system in (Systems.ECOTOP, Systems.PELLETELEGANCE)
+
+
+async def test_the_chimney_sweep_register_separates_an_ecotop_from_a_pellet_elegance() -> None:
+    """Every biomass boiler but the ecotop has the chimney sweep function."""
+    values = {(INPUT, 2400): 650, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    detection = await detect_through(await controller(values, absent=[(HOLDING, 33410)]))
+    assert detection.system is Systems.ECOTOP
+
+    detection = await detect_through(await controller(values))
+    assert detection.system is Systems.PELLETELEGANCE
+
+
+#: The three real Pellet Elegance `detect --evidence` reports from
+#: home-assistant-solarfocus#237, transcribed from the biomass_boiler evidence
+#: each one printed. Every one of them was detected as an octoplus before this
+#: file's fix, purely because 2410 had a live return flow temperature.
+_PELLET_ELEGANCE_REPORTS = {
+    "RobertoCravallo, firmware 23.080": {
+        (INPUT, 2400): 227,  # temperature
+        (INPUT, 2401): 6,  # status
+        (INPUT, 2410): 218,  # octoplus_buffer bottom / return temperature
+        (INPUT, 2411): 2700,  # octoplus_buffer top
+        (INPUT, 2402): 3,
+        (INPUT, 2403): 54179,  # operating_minutes = 250787
+        (INPUT, 2416): 1,
+        (INPUT, 2417): 58872,  # pellet_usage_total = 124408
+    },
+    "CarlosDerSeher, firmware 25.030": {
+        (INPUT, 2400): 211,
+        (INPUT, 2401): 6,
+        (INPUT, 2409): 0,  # operating_mode
+        (INPUT, 2410): 211,
+        (INPUT, 2411): 2700,
+        (INPUT, 2402): 1,
+        (INPUT, 2403): 17034,  # operating_minutes = 82570
+        (INPUT, 2416): 0,
+        (INPUT, 2417): 54186,  # pellet_usage_total = 54186
+    },
+    "Nugman, firmware 25.110": {
+        (INPUT, 2400): 255,
+        (INPUT, 2401): 0,
+        (INPUT, 2409): 0,
+        (INPUT, 2410): 258,
+        (INPUT, 2411): 1500,  # implausibly hot for a buffer - see #237
+        (INPUT, 2402): 3,
+        (INPUT, 2403): 54261,  # operating_minutes = 250869
+        (INPUT, 2416): 1,
+        (INPUT, 2417): 18638,  # pellet_usage_total = 84174
+    },
+}
+
+
+@pytest.mark.parametrize("report", _PELLET_ELEGANCE_REPORTS.values(), ids=_PELLET_ELEGANCE_REPORTS.keys())
+async def test_a_real_pellet_elegance_report_from_237_is_no_longer_told_as_an_octoplus(report: dict[tuple[RegisterKind, int], int]) -> None:
+    values = {**report, (INPUT, 501): 1, (INPUT, 1904): 1, (INPUT, 1107): 2}
+    absent = [(INPUT, 2409)] if (INPUT, 2409) not in report else []
+    detection = await detect_through(await controller(values, absent=absent))
+    assert detection.system is Systems.PELLETELEGANCE
+
+
+async def test_ragesofts_real_therminator_report_from_237_no_longer_defaults_to_ecotop() -> None:
+    """The real system is a Therminator 2, idling.
+
+    log_wood and operating_mode both read 0, which - per
+    `test_an_idle_operating_mode_falls_through_to_the_chimney_sweep_check`
+    above - is indistinguishable here from a pellet elegance. That is a known
+    limitation, not something this fixes; what the fix changes is that it no
+    longer defaults to ecotop, which had lost this installation its chimney
+    sweep and pellet-store-reset entities outright.
+    """
+    values = {
+        (INPUT, 2400): 219,  # temperature
+        (INPUT, 2401): 301,  # status
+        (INPUT, 2409): 0,  # operating_mode
+        (INPUT, 2410): 0,  # octoplus_buffer bottom / return temperature - unused on a therminator
+        (INPUT, 2411): 0,  # octoplus_buffer top
+        (INPUT, 501): 1,
+        (INPUT, 1904): 1,
+        (INPUT, 1107): 2,
+    }
+    detection = await detect_through(await controller(values))
+    assert detection.system is not Systems.ECOTOP
 
 
 async def test_a_controller_that_says_nothing_admits_it_is_guessing() -> None:
