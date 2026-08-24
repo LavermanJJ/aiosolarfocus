@@ -64,7 +64,8 @@ UNRESOLVED: dict[tuple[RegisterKind, int], Disagreement] = {
     (RegisterKind.INPUT, 2104): Disagreement(
         "The document gives the solar heat meter flow no scale factor; the predecessor "
         "scaled it by a tenth. Unit is litres, so both are plausible. Verify against a "
-        "system that has solar before changing either."
+        "system that has solar before changing either - asked for in "
+        "home-assistant-solarfocus#239."
     ),
 }
 

@@ -53,8 +53,10 @@ loudly rather than leaving a stale note behind.
   authority; recorded in `CORRECTIONS`.
 - **Input `2104`**, solar heat meter flow. The predecessor scaled it by a tenth
   and this library keeps doing so, but the unit is litres and both readings are
-  plausible. **Unresolved** — recorded in `UNRESOLVED`, and waiting on a dump
-  from a system that has solar.
+  plausible. **Unresolved** — recorded in `UNRESOLVED`, and open as
+  [home-assistant-solarfocus#239](https://github.com/LavermanJJ/home-assistant-solarfocus/issues/239),
+  which asks anyone with solar to compare the reading against the controller's
+  own display.
 
 ## Names that do not say what they look like they say
 
