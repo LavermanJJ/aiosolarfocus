@@ -27,10 +27,14 @@ silently shift every reading after it.
 ## 2. A read that *starts* at an unmapped address is refused outright
 
 Illegal data address, however long the read. So a slice beginning one register
-early does not shift — it fails, loudly. That asymmetry is why the missing
-`32900` row in the register document matters: if heating circuit 7's holding
-block really does start at an address the firmware does not map, that circuit
-loses its whole block rather than reading it wrong.
+early does not shift — it fails, loudly.
+
+That asymmetry is what made heating circuit 7 worth chasing rather than
+assuming. The register document prints its flow setpoint at `32750`, which is
+circuit 4's address; had `32900` really been unmapped, the circuit would have
+lost its whole holding block instead of reading it slightly wrong. It is a
+copy-paste slip in the specification, and the library reads `32900` — see
+[the document's errata](register-document.md).
 
 ## 3. A 32-bit register refuses a read of one register
 

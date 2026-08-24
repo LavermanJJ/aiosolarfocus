@@ -15,10 +15,11 @@ class Solar(Component):
     collector_supply_temperature = celsius(2, doc="Kollektorvorlauftemperatur")
     collector_return_temperature = celsius(3, doc="Kollektorrücklauftemperatur")
     #: The register document gives 2104 no scale factor; the predecessor scaled
-    #: it by a tenth. Unresolved, and listed in KNOWN_DISAGREEMENTS - the
-    #: predecessor's behaviour is kept until hardware settles it, so that a
-    #: reading here can be compared against the old library register for
-    #: register without this one difference standing in the way.
+    #: it by a tenth. Unresolved, and listed in UNRESOLVED in
+    #: tests/test_register_table.py - the predecessor's behaviour is kept until
+    #: hardware settles it, so that a reading here can be compared against the
+    #: old library register for register without this one difference standing in
+    #: the way.
     flow_heat_meter = tenths(4, unit="l", doc="Durchfluss WMZ")
     current_power = tenths(5, unit="kW", doc="aktuelle Leistung")
     current_yield_heat_meter = unscaled(6, width=2, unit="Wh", doc="Ertrag WMZ")

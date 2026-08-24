@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Heating circuit 7's `32900` is settled**, and is no longer a known
+  limitation. The vendor document does carry the row; it prints the address as
+  `32750`, which is circuit 4's, four rows up the same page. The library already
+  read `32900` and goes on doing so. The register document now lives in
+  [`docs/`](docs/), with its known errors written up in
+  [`docs/register-document.md`](docs/register-document.md).
+
 ## 0.2.0
 
 Real register dumps from three Pellet Elegance controllers and a Therminator

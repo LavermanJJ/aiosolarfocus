@@ -299,7 +299,7 @@ Holding,32855,1,Raumtemperatur Soll,int16,°C,*10,Heating circuit 6 target room 
 Holding,32856,1,Raumtemperatur Ist extern,int16,°C,*10,Heating circuit 6 external room temperature,V20.110
 Holding,32857,1,Raumfeuchte externer Raumfühler,int16,%,-,Heating circuit 6 external room humidity,V20.110
 Holding,32858,1,Heizkreismodus,int16,-,-,Heating circuit 6 mode,V22.090
-Holding,32750,1,Vorlaufsolltemperatur Heizen / Kühlen,int16,°C,*10,Heating circuit 7 target flow temperature,V20.110
+Holding,32750,1,Vorlaufsolltemperatur Heizen / Kühlen,int16,°C,*10,Heating circuit 7 target flow temperature - the document misprints the address as circuit 4's; it is 32900,V20.110
 Holding,32902,1,Kühlen E/A,int16,-,-,Heating circuit 7 cooling on/off,V20.110
 Holding,32903,1,Heizkreisbetriebsart,int16,-,-,Heating circuit 7 operating mode,V20.110
 Holding,32905,1,Raumtemperatur Soll,int16,°C,*10,Heating circuit 7 target room temperature,V20.110

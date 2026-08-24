@@ -5,6 +5,10 @@ specification. In the predecessor it was documentation that nothing loaded, so
 it drifted from the code silently and in both directions. Here it is package
 data with two jobs: the test suite checks every table against it, and the fake
 controller uses it to know which addresses a real controller answers.
+
+It transcribes the document's errors along with the rest of it, so that the
+cross-check is asking about the document and not about itself. Those errors are
+written up in docs/register-document.md and decided in tests/test_register_table.py.
 """
 
 from __future__ import annotations

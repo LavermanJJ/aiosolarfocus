@@ -13,7 +13,10 @@ Add one line to the component's class body. Take the address, the width, the
 signedness and the scale from `src/aiosolarfocus/data/registers.csv`; the test
 suite checks all four, and the `doc=` string against the document's own name for
 it. If they disagree, record the disagreement in
-`tests/test_register_table.py` with a reason rather than editing either quietly.
+`tests/test_register_table.py` with a reason rather than editing either quietly:
+the CSV transcribes the vendor document errors and all, and
+[`docs/register-document.md`](docs/register-document.md) explains which errors
+are known.
 
 Then look at the read plan, which no register changes without affecting:
 

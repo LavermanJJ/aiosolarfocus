@@ -37,6 +37,17 @@ class Disagreement:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class Misprint(Disagreement):
+    """A register the document lists, under an address that cannot be its own.
+
+    `printed_as` is the address it is printed at, which is another register's,
+    so the misprint shows up in the transcription as a duplicated address.
+    """
+
+    printed_as: int
+
+
 #: The document is wrong here and the controller is the authority.
 CORRECTIONS: dict[tuple[RegisterKind, int], Disagreement] = {
     (RegisterKind.HOLDING, 32607): Disagreement(
@@ -57,18 +68,21 @@ UNRESOLVED: dict[tuple[RegisterKind, int], Disagreement] = {
     ),
 }
 
-#: Addresses the transcription is missing, where the pattern around them says
-#: the controller has them. Not edited into registers.csv: that file is a
-#: transcription of the vendor document, and inventing a row in it would put
-#: something there that nobody has read off the PDF.
-DOCUMENT_GAPS: dict[tuple[RegisterKind, int], Disagreement] = {
-    (RegisterKind.HOLDING, 32900): Disagreement(
-        "Heating circuit 7's flow setpoint. Seven of the eight circuits have their "
-        "block-opening row in the document and this one does not, while 32902 to 32908 "
-        "are all listed and circuit 8's 32950 is too. Almost certainly a dropped row "
-        "rather than a firmware that skips one register in one circuit - but worth "
-        "checking against the PDF, because a read that *starts* at an unmapped address "
-        "is refused outright, and circuit 7 would lose its whole holding block."
+#: Addresses the document prints wrongly, so the transcription has no row at
+#: the address the register is really at. Not edited into registers.csv: that
+#: file is a transcription of the vendor document, and correcting it there would
+#: leave the cross-check asking whether the table agrees with itself. See
+#: docs/register-document.md.
+MISPRINTED_ADDRESSES: dict[tuple[RegisterKind, int], Misprint] = {
+    (RegisterKind.HOLDING, 32900): Misprint(
+        reason=(
+            "Heating circuit 7's flow setpoint, printed at 32750 - circuit 4's address, "
+            "four rows up the same page of the PDF. A copy-paste slip in the "
+            "specification rather than a firmware that skips one register in one "
+            "circuit: 32902 to 32908 are all listed, circuit 8's 32950 is too, and every "
+            "other cell of the row matches the seven circuits around it."
+        ),
+        printed_as=32750,
     ),
 }
 
@@ -102,8 +116,8 @@ IDS = [f"{system.value}-{spec.id.value}-{resolved.name}" for system, spec, resol
 def test_every_register_is_where_the_document_says(system: Systems, spec: ComponentSpec, resolved: ResolvedRegister) -> None:
     """Address, width, signedness and scale, against the register document."""
     key = (resolved.kind, resolved.address)
-    if key in DOCUMENT_GAPS:
-        pytest.skip(DOCUMENT_GAPS[key].reason)
+    if key in MISPRINTED_ADDRESSES:
+        pytest.skip(MISPRINTED_ADDRESSES[key].reason)
     rows = load_spec().get(key)
     assert rows is not None, f"{spec.id.value}.{resolved.name} claims {resolved.kind.value} {resolved.address}, which the document does not list"
     row = rows[0]
@@ -125,8 +139,8 @@ def test_every_register_is_named_as_the_document_names_it(system: Systems, spec:
     key = (resolved.kind, resolved.address)
     if key in NAME_NOTES:
         pytest.skip(NAME_NOTES[key])
-    if key in DOCUMENT_GAPS:
-        pytest.skip(DOCUMENT_GAPS[key].reason)
+    if key in MISPRINTED_ADDRESSES:
+        pytest.skip(MISPRINTED_ADDRESSES[key].reason)
     names = [row.name for row in load_spec()[key]]
     assert resolved.register.doc in names, f"{resolved.name} at {resolved.kind.value} {resolved.address}: table calls it {resolved.register.doc!r}, document calls it {names}"
 
@@ -143,14 +157,14 @@ def test_every_instance_of_a_repeated_component_is_documented(spec: ComponentSpe
         input_base, holding_base = spec.bases(index, NEWEST)
         if input_base is not None:
             assert (RegisterKind.INPUT, input_base) in documented, f"{spec.label} {index + 1} starts at input {input_base}, which the document does not list"
-        if holding_base is not None and (RegisterKind.HOLDING, holding_base) not in DOCUMENT_GAPS:
+        if holding_base is not None and (RegisterKind.HOLDING, holding_base) not in MISPRINTED_ADDRESSES:
             assert (RegisterKind.HOLDING, holding_base) in documented, f"{spec.label} {index + 1} starts at holding {holding_base}, which the document does not list"
 
 
 def test_the_recorded_disagreements_are_all_still_real() -> None:
     """A disagreement that has been fixed should be deleted, not left as a licence."""
-    # Across every instance, not just the first: the one document gap is in
-    # heating circuit 7, and only circuit 7 claims that address.
+    # Across every instance, not just the first: the one misprinted address is
+    # in heating circuit 7, and only circuit 7 claims that address.
     claimed: set[tuple[RegisterKind, int]] = set()
     for system in Systems:
         for spec in COMPONENTS:
@@ -160,5 +174,20 @@ def test_the_recorded_disagreements_are_all_still_real() -> None:
                 input_base, holding_base = spec.bases(index, NEWEST)
                 layout = Layout.resolve(spec.component, NEWEST, system, input_base, holding_base)
                 claimed.update((resolved.kind, resolved.address) for resolved in layout.registers)
-    for key in list(CORRECTIONS) + list(UNRESOLVED) + list(NAME_NOTES) + list(DOCUMENT_GAPS):
+    for key in list(CORRECTIONS) + list(UNRESOLVED) + list(NAME_NOTES) + list(MISPRINTED_ADDRESSES):
         assert key in claimed, f"{key} is recorded as a disagreement but no register claims that address any more"
+
+
+def test_the_misprinted_addresses_are_still_misprinted() -> None:
+    """A document revision that fixes the address should retire the entry, not outlive it.
+
+    A misprinted address is another register's, so the transcription lists that
+    other address twice. When the duplicate goes, the row is where it belongs and
+    the ordinary cross-check above can have it back.
+    """
+    for (kind, address), misprint in MISPRINTED_ADDRESSES.items():
+        assert (kind, address) not in load_spec(), f"the document now lists {kind.value} {address}; delete its entry and let the cross-check run"
+        printed = load_spec().get((kind, misprint.printed_as), ())
+        assert len(printed) > 1, (
+            f"{kind.value} {address} is recorded as misprinted at {misprint.printed_as}, but the transcription lists {misprint.printed_as} {len(printed)} time(s), not twice"
+        )

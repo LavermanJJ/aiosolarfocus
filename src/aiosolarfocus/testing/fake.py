@@ -126,9 +126,9 @@ class FakeController:
         """A controller that has exactly what this configuration expects of it.
 
         Every address the register document lists, plus every address the
-        configuration's own tables ask for - the two differ where the document's
-        transcription is missing a row - and every 32-bit register marked as one,
-        so a one-register read of a counter is refused the way a real one refuses it.
+        configuration's own tables ask for - the two differ where the document
+        misprints an address - and every 32-bit register marked as one, so a
+        one-register read of a counter is refused the way a real one refuses it.
         """
         mapped: set[_Address] = set(documented_addresses())
         wide: set[_Address] = set()

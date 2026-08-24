@@ -142,6 +142,7 @@ the most useful thing you can contribute.
 
 - [`docs/registers.md`](docs/registers.md) — the register map, generated from the tables.
 - [`docs/protocol.md`](docs/protocol.md) — how the controller actually behaves, including the ways it misbehaves.
+- [`docs/register-document.md`](docs/register-document.md) — the vendor specification everything is read from, and where it is wrong.
 - [`docs/porting-from-pysolarfocus.md`](docs/porting-from-pysolarfocus.md) — coming from the synchronous library.
 
 ## Testing against it
