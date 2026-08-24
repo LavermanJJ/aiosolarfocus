@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.0
+
+Real register dumps from three Pellet Elegance controllers and a Therminator
+(home-assistant-solarfocus#237) turned up sentinel values and a detection tie
+the specification alone hadn't covered.
+
+### Bugs fixed rather than carried over
+
+- **A biomass boiler's cleaning or ash container reading of -1% or -999%
+  was published as a real percentage**, and a heating circuit's humidity the
+  same at -0.1%. Two Pellet Elegance controllers marked an absent cleaning
+  sensor with -1 and read the ash container fine; a Therminator marked an
+  absent ash container with -999 and read the cleaning fine — so `cleaning`,
+  `ash_container` and `humidity` now decode both markers to `None`.
+- **`outdoor_temperature_external` published -999.9 °C as a reading**, the
+  value all three controllers send before anyone has written one — twenty
+  degrees past the -50 °C floor the same register refuses to be written
+  past. It decodes to `None`, alongside the existing open-channel sentinel.
+- **A flag register read as `True` when the controller had nothing to put
+  there.** 0xFFFF decoded through `bool()` reports every flag as set; two
+  controllers read it from holding 32003 and had it decode into a
+  circulation request nobody had made. Every flag now decodes 0xFFFF to
+  `None` instead.
+- **Detection called an octoplus off register 2410 alone**, the same
+  register a Pellet Elegance and an EcoTop read their return flow
+  temperature from — all three Pellet Elegance dumps in #237 had a live
+  reading there and were detected as an octoplus for exactly that reason.
+  Only 2411 counts now, and only within a range a buffer sensor could
+  plausibly report.
+- **EcoTop and Pellet Elegance were indistinguishable, and detection always
+  guessed EcoTop.** It now probes the chimney-sweep holding register
+  (33410) as a tie-break: a refusal reads as EcoTop, a mapped register as
+  Pellet Elegance — the guess that costs fewer entities when it is wrong.
+
 ## 0.1.0
 
 First release. `aiosolarfocus` is an async rewrite of
