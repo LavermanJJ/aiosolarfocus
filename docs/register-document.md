@@ -4,8 +4,10 @@ Everything this library knows about addresses, widths, signedness and scale
 comes from one vendor PDF:
 
 > **DR-0180-DE / v14-260212** — *Regelung eco<sup>manager-touch</sup>: Modbus TCP
-> Registerdaten*, kept here as
-> [`ecomanager-touch_modbus-tcp_registerdaten_anleitung1-2_v14-260212.pdf`](ecomanager-touch_modbus-tcp_registerdaten_anleitung1-2_v14-260212.pdf).
+> Registerdaten*, published by SOLARFOCUS.
+
+The PDF is theirs, so it is not redistributed here; ask Solarfocus for it. Every
+page reference below is to that revision.
 
 `src/aiosolarfocus/data/registers.csv` is that PDF as data. It is a
 **transcription, not a correction**: where the document is wrong, the CSV is

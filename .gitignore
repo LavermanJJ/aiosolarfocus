@@ -11,3 +11,4 @@ build/
 htmlcov/
 coverage.xml
 .DS_Store
+*.pdf
