@@ -1,7 +1,17 @@
-# aiosolarfocus
+<p align="center">
+  <a href="https://github.com/lavermanjj/home-assistant-solarfocus">
+    <img src="https://brands.home-assistant.io/solarfocus/logo.png" alt="Logo" height="80">
+  </a>
+</p>
 
-Async Python client for [Solarfocus](https://www.solarfocus.com) **eco<sup>manager-touch</sup>**
-heating systems, over Modbus TCP.
+<h3 align="center">aiosolarfocus</h3>
+
+<p align="center">
+  Async Python client for <a href="https://www.solarfocus.com/">Solarfocus</a> eco<sup>manager-touch</sup> heating systems, over Modbus TCP. The successor of <a href="https://github.com/LavermanJJ/pysolarfocus">pysolarfocus</a>.
+</p>
+
+
+
 
 > [!WARNING]
 > Unofficial, and developed without support from Solarfocus. Writing to a
