@@ -66,12 +66,18 @@ IMPLAUSIBLE_BUFFER_TEMPERATURE = 1000
 #: own preamble says why: a refusal is good evidence for an ecotop, while a
 #: mapped register is weak evidence against one, because the 26.020 controller
 #: this was written against mapped every documented register bar the X35 sensors
-#: of the buffers it did not have. No dump settles which way an ecotop goes -
-#: none of the three in #237 is one. So this is the tie-break between the two
-#: models nothing else separates rather than a reading of the model, and it
-#: breaks towards the pellet elegance: guessing that costs an ecotop a sweep
-#: button it will refuse, where guessing the other way costs a pellet elegance
-#: the sweep and pellet-store-reset entities it does have.
+#: of the buffers it did not have. That was a suspicion about firmware in
+#: general when this was written; a real Ecotop dump (#237, lein1013) now
+#: confirms it about this register specifically - 33410 read mapped on a
+#: controller that is genuinely an Ecotop, so a mapped reading is not evidence
+#: of a pellet elegance, only that this firmware maps the block regardless of
+#: what is installed. Refusal is still unconfirmed in either direction: no
+#: dump, that one included, has ever shown it. So this stays the tie-break
+#: between the two models nothing else separates rather than a reading of
+#: either, and it still breaks towards the pellet elegance: guessing that
+#: costs a real ecotop three entities that read back nothing, where guessing
+#: the other way costs a pellet elegance the sweep and pellet-store-reset
+#: entities it does have.
 CHIMNEY_SWEEP_HOLDING = 33410
 
 #: Registers a version introduced, each picked to be there whatever the
@@ -319,13 +325,14 @@ class _Prober:
             # leaves ecotop and pellet elegance, indistinguishable by anything
             # read so far. The chimney sweep function is the only thing that
             # separates them at all, and `CHIMNEY_SWEEP_HOLDING` says how far
-            # that goes: a refused register makes this an ecotop, a mapped one
-            # leaves the pellet elegance as the safer of two guesses rather
-            # than establishing it. A therminator idling in log mode 0 (#237's
-            # ragesoft) lands here too and reads as a pellet elegance rather
-            # than the ecotop this used to default to - wrong either way, but
-            # the pellet elegance guess is the one that leaves the sweep and
-            # pellet-store-reset entities in place.
+            # that goes - see its own comment for why a mapped reading, now
+            # seen on a real Ecotop (#237, lein1013), settles nothing and the
+            # guess still breaks towards the pellet elegance regardless. A
+            # therminator idling in log mode 0 (#237's ragesoft) lands here
+            # too and reads as a pellet elegance rather than the ecotop this
+            # used to default to - wrong either way, but the pellet elegance
+            # guess is the one that leaves the sweep and pellet-store-reset
+            # entities in place.
             has_chimney_sweep = await self._exists(HOLDING, CHIMNEY_SWEEP_HOLDING)
             self._evidence["chimney_sweep_holding"] = has_chimney_sweep
             system = Systems.PELLETELEGANCE if has_chimney_sweep else Systems.ECOTOP

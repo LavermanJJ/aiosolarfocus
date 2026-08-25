@@ -9,6 +9,19 @@
   now written up in
   [`docs/register-document.md`](docs/register-document.md).
 
+- **Detection's ecotop/pellet-elegance tie-break rests on evidence now, and
+  the evidence is against it.** A real Ecotop `detect --evidence` report
+  (home-assistant-solarfocus#237, lein1013) reads the chimney-sweep holding
+  register (`33410`) mapped, the direction detection has read as a pellet
+  elegance since 0.2.0. That was always the weaker of the tie-break's two
+  directions, guessed from firmware behaviour rather than measured; this is
+  the first dump to measure it, and it says the guess is wrong for a real
+  installation. There is no other register in the document that separates the
+  two, so this is recorded as a known limitation rather than fixed: detection
+  still guesses pellet elegance when the register is mapped, because guessing
+  ecotop instead costs a real pellet elegance two working entities, where this
+  costs a real ecotop three that read back nothing.
+
 ## 0.2.0
 
 Real register dumps from three Pellet Elegance controllers and a Therminator

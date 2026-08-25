@@ -303,6 +303,39 @@ async def test_ragesofts_real_therminator_report_from_237_no_longer_defaults_to_
     assert detection.system is not Systems.ECOTOP
 
 
+async def test_lein1013s_real_ecotop_report_is_still_told_as_a_pellet_elegance() -> None:
+    """The real system is an Ecotop, from a `detect --evidence` run posted to #237.
+
+    Nothing here separates it from a pellet elegance by the usual signals: 2410
+    reads a plausible return flow rather than an octoplus's buffer bottom, 2411
+    is 2700 - the open-channel sentinel `_plausible_buffer` already rejects -
+    and neither an operating mode nor log_wood says therminator. That leaves
+    the chimney-sweep tie-break, and on this real Ecotop holding 33410 reads
+    mapped: the first real dump on either side of `CHIMNEY_SWEEP_HOLDING`, and
+    it falsifies "mapped means pellet elegance" rather than confirming it.
+    Refusal remains unconfirmed in both directions, and there is no other
+    register in the document that separates the two, so the guess is still
+    wrong here - not fixed, because there is nothing to fix it with, only
+    documented the way `CHIMNEY_SWEEP_HOLDING`'s own comment now is.
+    """
+    values = {
+        (INPUT, 2400): 301,  # temperature
+        (INPUT, 2401): 0,  # status
+        (INPUT, 2409): 0,  # operating_mode
+        (INPUT, 2410): 305,  # octoplus_buffer bottom / return temperature
+        (INPUT, 2411): 2700,  # octoplus_buffer top - open-channel sentinel
+        (INPUT, 2402): 5,
+        (INPUT, 2403): 12915,  # operating_minutes = 340595
+        (INPUT, 2416): 3,
+        (INPUT, 2417): 36629,  # pellet_usage_total = 233237
+        (INPUT, 501): 1,
+        (INPUT, 1904): 1,
+        (INPUT, 1107): 0,
+    }
+    detection = await detect_through(await controller(values))
+    assert detection.system is Systems.PELLETELEGANCE
+
+
 async def test_a_controller_that_says_nothing_admits_it_is_guessing() -> None:
     """`system` is then a default rather than a finding, and says so."""
     detection = await detect_through(await controller())
