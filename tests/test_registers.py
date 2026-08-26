@@ -131,6 +131,40 @@ async def test_a_register_read_in_tenths_and_written_whole_round_trips() -> None
 
 
 @pytest.mark.asyncio
+async def test_a_write_in_another_unit_caches_what_the_next_read_will_report() -> None:
+    """The gap between the write and the next poll, on the one asymmetric register.
+
+    Caching the written words decoded at the *read* scale reported a tenth of
+    what was written: 56 % came back as 5.6 % until the next poll corrected it,
+    on a real controller (home-assistant-solarfocus#241). What the caller has
+    to see is what the register will report, not what went on the wire.
+    """
+    writer = RecordingWriter()
+    probe = build_probe(writer=writer)
+
+    await probe.write(Probe.humidity_external, 56.0)
+
+    assert writer.writes == [(RegisterKind.HOLDING, 32602, (56,))]
+    # Read back with nothing in between - no poll, no `decode_readings`.
+    assert probe.humidity_external == 56.0
+    # And the raw is the one a read gives, not the one that was written, so a
+    # caller comparing the two does not see the register jump.
+    assert probe.raw(Probe.humidity_external) == 560
+
+
+@pytest.mark.asyncio
+async def test_a_write_in_the_same_unit_caches_the_words_it_sent() -> None:
+    """Every other register: the words that went out are the ones read back."""
+    writer = RecordingWriter()
+    probe = build_probe(writer=writer)
+
+    await probe.write(Probe.target_temperature, 45.0)
+
+    assert probe.target_temperature == 45.0
+    assert probe.raw(Probe.target_temperature) == 450
+
+
+@pytest.mark.asyncio
 async def test_writing_a_read_only_register_is_refused() -> None:
     probe = build_probe(writer=RecordingWriter())
     with pytest.raises(ReadOnlyRegisterError, match="supply_temperature"):
