@@ -12,7 +12,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, overload
 
-from ..codec import decode, encode, words_to_raw
+from ..codec import decode, encode, raw_to_words, words_to_raw
 from ..const import Access, ApiVersion, RegisterKind, Systems, Write
 from ..exceptions import ReadOnlyRegisterError, SolarfocusError, UnsupportedRegisterError
 from ..registers import Derived, DerivedInfo, Register, RegisterInfo
@@ -276,15 +276,24 @@ class Component:
         # The controller took the value, so report it straight away rather than
         # waiting for the next poll. This is what lets a caller stop re-reading
         # the whole component after every single write.
+        #
+        # What to cache is what the *next read* will report, which is not the
+        # words that just went out: a register with a `write_scale` is read in
+        # one unit and written in another, so decoding the written words at the
+        # read scale reports a tenth of the value that was written. Heating
+        # circuit 32607 is the one, and 56 % came back as 5.6 % until the next
+        # poll corrected it. See home-assistant-solarfocus#241.
         for register, words in encoded:
-            self._raw[register.name] = words
-            self._values[register.name] = decode(
+            written_scale = register.write_scale if register.write_scale is not None else register.scale
+            value = decode(
                 words,
                 signed=register.signed,
-                scale=register.scale,
+                scale=written_scale,
                 sentinels=register.sentinels,
                 decode_fn=register.decode_fn,
             )
+            self._values[register.name] = value
+            self._raw[register.name] = words if written_scale == register.scale or value is None else raw_to_words(round(value / register.scale), width=register.width)
 
     # -- presentation ------------------------------------------------------ #
 

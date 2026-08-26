@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A write to the one register read and written in different units reported a
+  tenth of itself until the next poll.** Heating circuit `32607` is reported in
+  tenths of a percent and accepted as a whole percent; the write went out
+  correctly, but the value cached so the caller need not re-read was the
+  written words decoded at the *read* scale — so 56 % read back as 5.6 % for as
+  long as the poll interval, on a real controller. It now caches what the next
+  read will report, and its raw with it. Every other register is unaffected:
+  the two scales are the same, and the words that went out are the ones that
+  come back. (home-assistant-solarfocus#241)
+
 - **Heating circuit 7's `32900` is settled**, and is no longer a known
   limitation. The vendor document does carry the row; it prints the address as
   `32750`, which is circuit 4's, four rows up the same page. The library already
