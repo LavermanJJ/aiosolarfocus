@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
+
+One write bug, found against real hardware while migrating the Home Assistant
+integration onto this library (home-assistant-solarfocus#241).
 
 - **A write to the one register read and written in different units reported a
   tenth of itself until the next poll.** Heating circuit `32607` is reported in
