@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 Three detection bugs, all read off one report: fklein1980's Therminator 2 in
 home-assistant-solarfocus#237, the fourth real controller in that issue and the
