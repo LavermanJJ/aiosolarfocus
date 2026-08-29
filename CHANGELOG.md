@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+Three detection bugs, all read off one report: fklein1980's Therminator 2 in
+home-assistant-solarfocus#237, the fourth real controller in that issue and the
+first with solar on it. Detection is a setup helper — it fills the form in, it
+does not drive the integration — so nothing here changes what an installation
+already configured by hand reads.
+
+- **A therminator running pellets was detected as a Pellet Elegance.** The
+  only therminator evidence was the log wood input and Kesselbetriebsart 1–3,
+  so a combination boiler that happened to be burning pellets (mode 4) or
+  idling (mode 0) fell through to the pellet boiler guess — which costs it its
+  log wood and boiler operating mode entities, and gains it a return flow
+  temperature read from `2410`, an address a therminator does not assign.
+  Detection now also goes by the block the controller numbers its component
+  states in: a therminator enumerates them from 200, and the ecotop and three
+  Pellet Elegance dumps in the same issue all enumerate from 0, on the same
+  firmware. Both therminators in #237 are now told as therminators, and the
+  block is in the evidence as `state_block`.
+
+- **Heating circuits that are switched off were counted on a therminator.**
+  `HEATING_CIRCUIT_DISABLED` knew only status 7, "Heizkreis nicht
+  freigeschaltet" in the from-0 block; in the from-200 block that state is 212,
+  and the from-200 block is not the other one shifted by 200. A controller with
+  one circuit running and seven off was reported as having eight.
+
+- **Solar circuits that are not installed were counted.** The count took
+  `Solar – Statuszeile` as evidence that a circuit exists, and on the same
+  controller the three absent circuits each reported 201, "Kollektorfühler
+  Kurzschluss" — an absent sensor reading as a shorted one — so one solar
+  circuit was reported as four. The state is now read for the evidence and left
+  out of the count, because it cannot argue the other way either: in the from-0
+  block 0 is "Solarkreis in Betrieb", so a running circuit and an absent one
+  report the same value. The count goes by the collector, flow, return and
+  store sensor channels, which an absent circuit reads as a flat zero.
+
 ## 0.2.1
 
 One write bug, found against real hardware while migrating the Home Assistant

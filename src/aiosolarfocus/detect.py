@@ -44,13 +44,28 @@ HOLDING = RegisterKind.HOLDING
 #: a -1 is evidence that a channel is not configured rather than a measurement.
 NO_SENSOR = frozenset({1300, 2700, 65535})
 
-#: Heating circuit status 7 is "Heizkreis nicht freigeschaltet".
-HEATING_CIRCUIT_DISABLED = 7
+#: "Heizkreis nicht freigeschaltet": status 7 where the states are enumerated
+#: from 0, and 212 in the block a therminator numbers them in - that block is not
+#: the from-0 one shifted by 200, so the code has to be named separately. Both
+#: are unambiguous, because the from-0 table stops at 31, so one set covers a
+#: controller of either kind. Only 7 was here until fklein1980's therminator in
+#: home-assistant-solarfocus#237 reported one circuit at 214 and seven at 212,
+#: and was told it had eight heating circuits when it has one.
+HEATING_CIRCUIT_DISABLED = frozenset({7, 212})
 
 #: Boiler status 0 is "Boilerstatus nicht vorhanden" and buffer status 0 is
 #: "Status nicht vorhanden". The therminator systems enumerate the same states
 #: from 200, where the first is again the one meaning the component is not there.
 NOT_PRESENT = frozenset({0, 200})
+
+#: The code a controller that enumerates its component states from 200 starts at.
+#: Which block is in use is a property of the system rather than the firmware:
+#: both therminators in home-assistant-solarfocus#237 report their heating
+#: circuit, buffer and boiler states from 200, and the ecotop and the three
+#: pellet elegance dumps in the same issue all enumerate from 0 - on the same
+#: 26.020 firmware. No from-0 table reaches 200, the longest stopping at 31, so a
+#: single state that high says which block the controller is speaking.
+STATE_BLOCK_200 = 200
 
 #: A buffer temperature this high is not a real reading: no octoplus buffer
 #: runs anywhere near 100 degC. NO_SENSOR's exact sentinels are not the whole
@@ -99,6 +114,13 @@ BUFFER_BASE, BUFFER_STRIDE, BUFFER_MAX = 1900, 20, 4
 FRESH_WATER_BASE, FRESH_WATER_STRIDE, FRESH_WATER_MAX = 700, 25, 4
 CIRCULATION_BASE, CIRCULATION_STRIDE, CIRCULATION_MAX = 900, 25, 4
 SOLAR_BASE, SOLAR_STRIDE, SOLAR_MAX = 2100, 20, 4
+
+#: What a solar circuit is counted on - the two collector temperatures, the flow
+#: and return, and the first store sensor - and the state that is read with them
+#: for the evidence but says nothing either way. See `_detect_counts`.
+SOLAR_SENSORS = (0, 1, 2, 3, 10)
+SOLAR_STATE = 13
+
 DIFFERENTIAL_BASE, DIFFERENTIAL_STRIDE, DIFFERENTIAL_MAX = 2200, 10, 4
 
 _THERMINATOR_LOG_MODES = range(1, 4)
@@ -224,7 +246,15 @@ class _Prober:
             "heat_pump": "25.030" if heat_pump_is_modern else "legacy",
         }
 
-        has_heat_pump, has_biomass_boiler, system = await self._detect_system(heat_pump_is_modern)
+        # Read before the system is worked out rather than with the rest of the
+        # counts, because which block the controller numbers these states in is
+        # what tells a therminator from the pellet boilers. `_detect_counts`
+        # takes them from here rather than reading the eight registers again.
+        heating_circuit_states = [
+            await self._value(INPUT, HEATING_CIRCUIT_BASE + HEATING_CIRCUIT_STRIDE * index + heating_circuit_state_offset) for index in range(HEATING_CIRCUIT_MAX)
+        ]
+
+        has_heat_pump, has_biomass_boiler, system = await self._detect_system(heat_pump_is_modern, heating_circuit_states)
 
         photovoltaic_power = await self._dword(INPUT, 2500)
         self._evidence["photovoltaic_power"] = photovoltaic_power
@@ -239,7 +269,7 @@ class _Prober:
         self._evidence["fresh_water_module_cascade"] = [cascade_state, cascade_flow]
         self._evidence["circulation_module"] = circulation_supply
 
-        counts = await self._detect_counts(heating_circuit_state_offset, buffer_state_offset)
+        counts = await self._detect_counts(heating_circuit_states, buffer_state_offset)
         counts = _clamp_to_version(counts, api_version)
 
         detection = Detection(
@@ -257,7 +287,7 @@ class _Prober:
         _LOGGER.info("Detected %s on firmware %s in %d reads: %s", system.value, api_version.label, self._reads, counts)
         return detection
 
-    async def _detect_system(self, heat_pump_is_modern: bool) -> tuple[bool, bool, Systems]:
+    async def _detect_system(self, heat_pump_is_modern: bool, heating_circuit_states: list[int | None]) -> tuple[bool, bool, Systems]:
         """Which heat generator is installed, and so which system this is."""
         supply = await self._value(INPUT, 2300)
         return_temperature = await self._value(INPUT, 2301)
@@ -283,6 +313,9 @@ class _Prober:
             "pellet_usage_total": pellets,
             "operating_minutes": operating_minutes,
         }
+
+        enumerates_from_200 = any(state is not None and state >= STATE_BLOCK_200 for state in heating_circuit_states)
+        self._evidence["state_block"] = STATE_BLOCK_200 if enumerates_from_200 else 0
 
         # A heat pump is a vampair whatever else is on the controller, because
         # that is the component the library builds for it. Which biomass boiler
@@ -314,31 +347,40 @@ class _Prober:
             # Mode 0 is logs as well, but it is also what an unset register
             # reads, so it is not taken as evidence of anything.
             system = Systems.THERMINATOR
+        elif enumerates_from_200:
+            # A therminator that is not burning logs right now: mode 4 is
+            # pellets, and a combination boiler on pellets says nothing about
+            # the logs it can also burn. What still separates it is the block it
+            # numbers its states in - see `STATE_BLOCK_200`. Both therminators in
+            # #237 were read as pellet boilers without this, fklein1980's on
+            # pellets and ragesoft's idling in mode 0, and a therminator read as
+            # a pellet elegance loses its log wood and operating mode entities
+            # and gains a return flow temperature from 2410, an address a
+            # therminator does not assign.
+            system = Systems.THERMINATOR
         else:
-            # Neither octoplus nor an actively-logging therminator - which
-            # leaves ecotop and pellet elegance, indistinguishable by anything
-            # read so far. The chimney sweep function is the only thing that
-            # separates them at all, and `CHIMNEY_SWEEP_HOLDING` says how far
-            # that goes: a refused register makes this an ecotop, a mapped one
-            # leaves the pellet elegance as the safer of two guesses rather
-            # than establishing it. A therminator idling in log mode 0 (#237's
-            # ragesoft) lands here too and reads as a pellet elegance rather
-            # than the ecotop this used to default to - wrong either way, but
-            # the pellet elegance guess is the one that leaves the sweep and
-            # pellet-store-reset entities in place.
+            # Neither octoplus nor therminator - which leaves ecotop and pellet
+            # elegance, indistinguishable by anything read so far. The chimney
+            # sweep function is the only thing that separates them at all, and
+            # `CHIMNEY_SWEEP_HOLDING` says how far that goes: a refused register
+            # makes this an ecotop, a mapped one leaves the pellet elegance as
+            # the safer of two guesses rather than establishing it.
             has_chimney_sweep = await self._exists(HOLDING, CHIMNEY_SWEEP_HOLDING)
             self._evidence["chimney_sweep_holding"] = has_chimney_sweep
             system = Systems.PELLETELEGANCE if has_chimney_sweep else Systems.ECOTOP
 
         return has_heat_pump, has_biomass_boiler, system
 
-    async def _detect_counts(self, heating_circuit_state_offset: int, buffer_state_offset: int) -> ComponentCounts:
-        """How many of each repeated component the controller is driving."""
+    async def _detect_counts(self, heating_circuits: list[int | None], buffer_state_offset: int) -> ComponentCounts:
+        """How many of each repeated component the controller is driving.
+
+        The heating circuit states are handed in because `run` has already read
+        them, to tell the system by the block they are numbered in.
+        """
 
         async def instances(base: int, stride: int, maximum: int, offset: int = 0) -> list[int | None]:
             return [await self._value(INPUT, base + stride * index + offset) for index in range(maximum)]
 
-        heating_circuits = await instances(HEATING_CIRCUIT_BASE, HEATING_CIRCUIT_STRIDE, HEATING_CIRCUIT_MAX, heating_circuit_state_offset)
         boilers = await instances(BOILER_BASE, BOILER_STRIDE, BOILER_MAX, 1)
         buffers = await instances(BUFFER_BASE, BUFFER_STRIDE, BUFFER_MAX, buffer_state_offset)
         circulations = await instances(CIRCULATION_BASE, CIRCULATION_STRIDE, CIRCULATION_MAX)
@@ -351,12 +393,21 @@ class _Prober:
         ]
 
         # The solar circuit has no state saying whether it is there, so it goes
-        # by the whole block reading plain zero. A channel that is configured
+        # by its sensor channels reading plain zero. A channel that is configured
         # but has no sensor on it reports 130.0 or 270.0 degC, which counts as
         # there rather than not: an unconfigured one reads 0, the same way the
         # buffers that are not there have no X35 register at all while the one
         # that is has it reading 270.0.
-        solar = [[await self._value(INPUT, SOLAR_BASE + SOLAR_STRIDE * index + offset) for offset in (0, 1, 2, 3, 10, 13)] for index in range(SOLAR_MAX)]
+        #
+        # `Solar - Statuszeile` is read with them for the evidence but left out
+        # of the count, because it is nonzero either way round. The three
+        # circuits fklein1980's therminator does not have each reported 201,
+        # "Kollektorfühler Kurzschluss" in the from-200 block - an absent sensor
+        # reading as a shorted one - and were counted as circuits for it
+        # (home-assistant-solarfocus#237). It cannot argue the other way either:
+        # in the from-0 block 0 is "Solarkreis in Betrieb", so a running circuit
+        # and an absent one report the same thing.
+        solar = [[await self._value(INPUT, SOLAR_BASE + SOLAR_STRIDE * index + offset) for offset in (*SOLAR_SENSORS, SOLAR_STATE)] for index in range(SOLAR_MAX)]
 
         # The differential module is read for the evidence but never counted.
         # The same rule as solar would have claimed one on the system this was
@@ -379,12 +430,12 @@ class _Prober:
         self._evidence["differential_modules"] = differential
 
         return ComponentCounts(
-            heating_circuits=sum(1 for state in heating_circuits if state is not None and state != HEATING_CIRCUIT_DISABLED),
+            heating_circuits=sum(1 for state in heating_circuits if state is not None and state not in HEATING_CIRCUIT_DISABLED),
             boilers=sum(1 for state in boilers if state is not None and state not in NOT_PRESENT),
             buffers=sum(1 for state in buffers if state is not None and state not in NOT_PRESENT),
             fresh_water_modules=sum(1 for state, temperature in fresh_water if _live(state) or _live(temperature)),
             circulations=sum(1 for temperature in circulations if _live(temperature)),
-            solar=sum(1 for values in solar if any(_configured(value) for value in values)),
+            solar=sum(1 for values in solar if any(_configured(value) for value in values[: len(SOLAR_SENSORS)])),
             differential_modules=0,
         )
 
