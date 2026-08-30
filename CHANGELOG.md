@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 - **Solar `2104`, `Durchfluss WMZ`, is no longer scaled by a tenth.** The
   predecessor scaled it, this library kept the scaling so readings could be
