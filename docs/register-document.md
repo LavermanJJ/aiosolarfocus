@@ -53,12 +53,22 @@ loudly rather than leaving a stale note behind.
   reports 440 for 44.0 % and accepts a write of 44, so it is read in tenths and
   written whole — see home-assistant-solarfocus#150. The controller is the
   authority; recorded in `CORRECTIONS`.
-- **Input `2104`**, solar heat meter flow. The predecessor scaled it by a tenth
-  and this library keeps doing so, but the unit is litres and both readings are
-  plausible. **Unresolved** — recorded in `UNRESOLVED`, and open as
-  [home-assistant-solarfocus#239](https://github.com/LavermanJJ/home-assistant-solarfocus/issues/239),
-  which asks anyone with solar to compare the reading against the controller's
-  own display.
+- **Input `2104`**, solar heat meter flow. Here the document is right and the
+  predecessor was wrong: it scaled the register by a tenth, and a Therminator 2
+  read 23.3 while the eco-manager-touch's own display, at the same moment, read
+  233 — see
+  [home-assistant-solarfocus#239](https://github.com/LavermanJJ/home-assistant-solarfocus/issues/239).
+  The raw register is the reading. Nothing is recorded for it, because there is
+  no longer anything to disagree about; settling it emptied `UNRESOLVED`.
+
+## A unit the document understates
+
+- **Input `2104`** again. The document calls it `l`, *aktueller Durchfluss
+  Wärmemengenzähler in Liter*, and the controller's display calls it **l/h**. A
+  *Durchfluss* is a rate and litres are not, so the table carries `l/h`. Only
+  the label differs — no reading changes — and units are the one column of the
+  document the cross-check does not compare, so this is written down here
+  rather than in a table in the test suite.
 
 ## Names that do not say what they look like they say
 
