@@ -17,6 +17,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import Any
 
+from . import __version__
 from .client import SolarfocusClient
 from .components import COMPONENTS, ComponentId, ComponentSpec
 from .config import SolarfocusConfig
@@ -120,6 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     write.set_defaults(run=_run_set)
 
     parser.add_argument("--verbose", "-v", action="count", default=0, help="-v for detail, -vv for the Modbus traffic")
+    parser.add_argument("--version", action="version", version=f"aiosolarfocus {__version__}")
     return parser
 
 
@@ -207,12 +209,17 @@ async def _detect(args: argparse.Namespace) -> int:
     config = detection.config(host=args.host, port=args.port, device_id=args.device_id)
 
     if args.json:
+        print(f"aiosolarfocus {__version__}", file=sys.stderr)
         print(json.dumps({field: _jsonable(getattr(config, field)) for field in _config_fields()}, indent=2))
     else:
-        print(f"{args.host}:{args.port}  read in {detection.reads} probes\n")
+        print(f"{args.host}:{args.port}  aiosolarfocus {__version__}  read in {detection.reads} probes\n")
         rows = [
             ("system", detection.system.value, "" if detection.confident else "  a default: no heat generator reported anything"),
-            ("firmware", detection.api_version.label, ""),
+            # fklein1980's controller prints 26.030 on its own screen and reads
+            # as 26.020 here, which looks like a misdetection and is not: a
+            # firmware newer than the newest register set we know reads as that
+            # set, which is every register of it the controller has.
+            ("firmware", detection.api_version.label, "  the newest register set this library knows" if detection.api_version is max(ApiVersion) else ""),
         ]
         for spec in COMPONENTS:
             count = config.count_of(spec.id)
@@ -250,9 +257,15 @@ async def _dump(args: argparse.Namespace) -> int:
         result = await client.update()
 
     if args.json:
-        print(json.dumps({"meta": {"system": config.system.value, "api_version": config.api_version.label}, "components": client.snapshot()}, indent=2, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"meta": {"system": config.system.value, "api_version": config.api_version.label, "aiosolarfocus": __version__}, "components": client.snapshot()},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
     else:
-        print(f"{config.address}  {config.system.value}  firmware {config.api_version.label}")
+        print(f"{config.address}  {config.system.value}  firmware {config.api_version.label}  aiosolarfocus {__version__}")
         for key, component in client.components.items():
             print(f"\n{key}{'' if component.available else '  (not read: ' + str(component.last_error) + ')'}")
             rows = []
@@ -286,7 +299,8 @@ async def _watch(args: argparse.Namespace) -> int:
     first = True
 
     async with SolarfocusClient(config) as client:
-        print(f"{config.address}  {config.system.value}  firmware {config.api_version.label}  every {args.interval:g}s; ctrl-c to stop", file=sys.stderr)
+        header = f"{config.address}  {config.system.value}  firmware {config.api_version.label}  aiosolarfocus {__version__}"
+        print(f"{header}  every {args.interval:g}s; ctrl-c to stop", file=sys.stderr)
         while True:
             result = await client.update(components=only)
             stamp = datetime.now().strftime("%H:%M:%S")

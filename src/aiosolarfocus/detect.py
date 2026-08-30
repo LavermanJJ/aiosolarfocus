@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .config import SolarfocusConfig
-from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, DEFAULT_TIMEOUT, ApiVersion, RegisterKind, Systems
+from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, DEFAULT_TIMEOUT, OPEN_CHANNEL, ApiVersion, RegisterKind, Systems
 from .transport import ModbusTransport, Transport
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,11 +38,13 @@ _LOGGER = logging.getLogger(__name__)
 INPUT = RegisterKind.INPUT
 HOLDING = RegisterKind.HOLDING
 
-#: What an unconfigured or open sensor channel reports instead of a temperature:
-#: 130.0 degC, 270.0 degC, and -1 read as unsigned. Wider than the read path's
-#: `OPEN_CHANNEL`, which leaves -1 out because -0.1 degC is a real reading; here
-#: a -1 is evidence that a channel is not configured rather than a measurement.
-NO_SENSOR = frozenset({1300, 2700, 65535})
+#: What an unconfigured or open sensor channel reports instead of a temperature.
+#: Exactly the read path's `OPEN_CHANNEL` plus -1 read as unsigned: -0.1 degC is
+#: a real reading, so blanking it there would lose a sensor every frosty night,
+#: while here a -1 is evidence that a channel is not configured. Derived from
+#: `OPEN_CHANNEL` rather than repeated, so a marker learned from a controller
+#: cannot land in one of the two and not the other.
+NO_SENSOR = OPEN_CHANNEL | {2**16 - 1}
 
 #: "Heizkreis nicht freigeschaltet": status 7 where the states are enumerated
 #: from 0, and 212 in the block a therminator numbers them in - that block is not

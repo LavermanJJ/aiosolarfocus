@@ -358,6 +358,41 @@ async def test_fkleins_solar_circuit_is_counted_once_not_four_times() -> None:
     assert detection.counts.boilers == 1
 
 
+async def test_fkleins_unwired_second_collector_still_counts_the_circuit() -> None:
+    """3500 is a marker, and a marker means the channel is there without a sensor.
+
+    The count goes by `_configured`, not `_live`, so learning 350.0 degC as an
+    open channel must not take a solar circuit away from anyone: a circuit whose
+    only reporting channel is an unwired one is still a circuit. Here the whole
+    of fklein1980's solar block bar the second collector is zeroed, leaving the
+    marker to carry it on its own.
+    """
+    values = dict(_FKLEIN_THERMINATOR)
+    for address in (2100, 2102, 2103, 2110):
+        values[(INPUT, address)] = 0
+    detection = await detect_through(await controller(values))
+    assert detection.counts.solar == 1
+    assert detection.evidence["solar"][0] == [0, 3500, 0, 0, 0, 219]
+
+
+async def test_fkleins_unwired_second_collector_is_not_read_as_350_degrees() -> None:
+    """The other half of the same finding: what the reading comes out as.
+
+    home-assistant-solarfocus#237. The circuit has one collector sensor, and
+    across three detection runs a day apart every other channel moved while
+    2101 sat at 3500. Without the marker the integration publishes a collector
+    temperature of 350 degC.
+    """
+    fake = await controller(_FKLEIN_THERMINATOR)
+    detection = await detect_through(fake)
+    client = SolarfocusClient(detection.config(host="c"), transport=fake)
+    assert (await client.update()).ok
+
+    solar = client.solar[0]
+    assert solar.collector_temperature_1 == 68.6
+    assert solar.collector_temperature_2 is None
+
+
 async def test_a_solar_circuit_with_nothing_but_a_state_is_not_counted() -> None:
     """The state is read for the evidence and left out of the count.
 

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from aiosolarfocus import __version__
 from aiosolarfocus.__main__ import _parse_value, _render, _resolve_target, main
 from aiosolarfocus.client import SolarfocusClient
 from aiosolarfocus.components.heating_circuit import HeatingCircuit
 from aiosolarfocus.config import SolarfocusConfig
 from aiosolarfocus.const import ApiVersion, Systems
+from aiosolarfocus.detect import Detection, detect_through
 from aiosolarfocus.enums import HeatingCircuitMode
-from aiosolarfocus.testing import FakeController
+from aiosolarfocus.testing import FakeController, load_spec
 
 
 def client() -> SolarfocusClient:
@@ -85,3 +87,27 @@ def test_a_mode_is_shown_by_name_rather_than_by_its_number() -> None:
     assert _render(HeatingCircuitMode.AUTOMATIC) == "automatic (2)"
     assert _render(None) == "-"
     assert _render(30.4) == "30.4"
+
+
+def test_version_is_printed_on_its_own_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        main(["--version"])
+    assert exit_.value.code == 0
+    assert capsys.readouterr().out.strip() == f"aiosolarfocus {__version__}"
+
+
+def test_detect_says_which_version_read_the_controller(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """The line people paste into an issue has to carry it.
+
+    fklein1980 ran an old version against a controller, posted the output, and
+    neither of us could tell from it - home-assistant-solarfocus#237.
+    """
+
+    async def fake_detect(host: str, port: int, device_id: int) -> Detection:
+        fake = FakeController(dict.fromkeys(load_spec(), 0))
+        await fake.connect()
+        return await detect_through(fake)
+
+    monkeypatch.setattr("aiosolarfocus.__main__.detect", fake_detect)
+    assert main(["detect", "--host", "c"]) == 0
+    assert f"aiosolarfocus {__version__}" in capsys.readouterr().out
