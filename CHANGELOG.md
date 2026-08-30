@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4
 
 Three findings out of home-assistant-solarfocus#237, where owners of
 controllers this library has never been run against keep posting what theirs
