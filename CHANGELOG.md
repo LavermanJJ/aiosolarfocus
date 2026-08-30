@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+Three findings out of home-assistant-solarfocus#237, where owners of
+controllers this library has never been run against keep posting what theirs
+report. The first two are fklein1980's Therminator 2, re-run against 0.2.2; the
+third is lein1013's Ecotop.
+
+- **A solar collector channel with no sensor on it read 350.0 °C.** The circuit
+  has one collector sensor and two channels, and across three detection runs a
+  day apart and a controller restart every other channel moved — collector 1
+  from 68.6 to 69.3 to 66.6 °C, the flow, the return and the store sensor with
+  it — while collector 2 sat at exactly 3500. No register in this table
+  measures anything that hot; a collector in stagnation, the hottest of them,
+  does not reach 200 °C. So 3500 joins 1300 and 2700 in `OPEN_CHANNEL` and the
+  reading decodes to None, which is how a caller is told a channel has no sensor
+  on it. Without it a solar system with one collector sensor publishes a
+  collector temperature of 350 °C.
+
+  Detection is unaffected on purpose: it counts a solar circuit by whether the
+  channel is *configured*, and a marker means configured-without-a-sensor, so a
+  circuit whose only reporting channel is an unwired one is still a circuit.
+  `detect.NO_SENSOR` is now derived from `OPEN_CHANNEL` rather than repeating
+  it, so a marker learned from a controller cannot land in one and not the
+  other.
+
+- **The command line says which version of the library produced its output.**
+  fklein1980 ran 0.2.1 against a controller after 0.2.2 was out, posted the
+  result, and nothing in it said so. `detect`, `dump` and `watch` now carry
+  `aiosolarfocus <version>` in the header line people paste, `dump --json` has
+  it in `meta` beside the system and the firmware, and there is a `--version`
+  flag. `detect --json` prints it to stderr, so what lands on stdout is still a
+  configuration and nothing else.
+
+  While that output was being read: `detect` now marks the firmware row when the
+  version it found is the newest register set the library knows. fklein1980's
+  controller prints 26.030 on its own screen and reads as 26.020 here, which
+  looks like a misdetection and is not — a newer firmware resolves to the newest
+  set we know, which is every register of it the controller has.
 - **Detection's ecotop/pellet-elegance tie-break rests on evidence now, and
   the evidence is against it.** A real Ecotop `detect --evidence` report
   (home-assistant-solarfocus#237, lein1013) reads the chimney-sweep holding

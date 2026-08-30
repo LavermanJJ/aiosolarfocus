@@ -14,13 +14,23 @@ DEFAULT_TIMEOUT = 3.0
 MAX_REGISTERS_PER_READ = 120
 
 #: What an unconfigured or open sensor channel reports instead of a measurement,
-#: in the tenths a temperature register is read in: 130.0 degC and 270.0 degC. A
-#: channel that is wired to something never gets there.
+#: in the tenths a temperature register is read in: 130.0 degC, 270.0 degC and
+#: 350.0 degC. A channel that is wired to something never gets there.
+#:
+#: 3500 came from fklein1980's therminator in home-assistant-solarfocus#237,
+#: which has one collector sensor on a solar circuit that has two channels.
+#: Across three detection runs a day apart and a controller restart, collector 1
+#: moved 68.6 -> 69.3 -> 66.6 degC, the flow and return and the store sensor all
+#: moved with it, and collector 2 read exactly 3500 every time. A collector in
+#: stagnation is the hottest thing any register in this table measures and it
+#: does not reach 200 degC, so the reading is a marker rather than a
+#: measurement - and without it a solar system with one sensor publishes a
+#: collector at 350 degC.
 #:
 #: 65535 (-1) is deliberately *not* here. -0.1 degC is a legitimate outdoor
 #: reading, and treating it as absence would blank a sensor every frosty night.
 #: Detection is where -1 counts as evidence that a channel is not configured.
-OPEN_CHANNEL = frozenset({1300, 2700})
+OPEN_CHANNEL = frozenset({1300, 2700, 3500})
 
 #: OPEN_CHANNEL's counterpart for a percent register. -0.1% has no equivalent
 #: to -0.1 degC on a frosty night - the document gives every one of these
