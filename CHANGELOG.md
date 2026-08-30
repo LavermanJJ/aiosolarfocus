@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Solar `2104`, `Durchfluss WMZ`, is no longer scaled by a tenth.** The
+  predecessor scaled it, this library kept the scaling so readings could be
+  compared register for register, and both were wrong: fklein1980's Therminator
+  2 read 23.3 in Home Assistant while the eco-manager-touch's own display, at
+  the same moment, read 233 — home-assistant-solarfocus#239. The document gave
+  it no scale factor and meant it. **The solar flow reading is ten times what it
+  was**, which is what the controller shows. The unit goes with it: the document
+  says `l`, the display says `l/h`, and a *Durchfluss* is a rate, so the table
+  now says `l/h` too.
+
+  This was the last entry in `UNRESOLVED` in `tests/test_register_table.py`.
+  Every register in the table now matches the document, or disagrees with it for
+  a reason measured on hardware.
+
 ## 0.2.2
 
 Three detection bugs, all read off one report: fklein1980's Therminator 2 in

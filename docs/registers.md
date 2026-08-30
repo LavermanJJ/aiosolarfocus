@@ -99,7 +99,7 @@ System **Vampair**, firmware **26.020**.
 | collector_temperature_2 | input | 2101 |  | signed | x0.1 | °C | read | 20.110 |  | Kollektortemperatur 2 |
 | collector_supply_temperature | input | 2102 |  | signed | x0.1 | °C | read | 20.110 |  | Kollektorvorlauftemperatur |
 | collector_return_temperature | input | 2103 |  | signed | x0.1 | °C | read | 20.110 |  | Kollektorrücklauftemperatur |
-| flow_heat_meter | input | 2104 |  | signed | x0.1 | l | read | 20.110 |  | Durchfluss WMZ |
+| flow_heat_meter | input | 2104 |  | signed |  | l/h | read | 20.110 |  | Durchfluss WMZ |
 | current_power | input | 2105 |  | signed | x0.1 | kW | read | 20.110 |  | aktuelle Leistung |
 | current_yield_heat_meter | input | 2106 | 32-bit | signed |  | Wh | read | 20.110 |  | Ertrag WMZ |
 | today_yield | input | 2108 | 32-bit | signed |  | Wh | read | 20.110 |  | Tagesertrag |

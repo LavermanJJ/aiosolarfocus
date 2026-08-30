@@ -60,14 +60,9 @@ CORRECTIONS: dict[tuple[RegisterKind, int], Disagreement] = {
 #: The table and the document differ and nobody has settled it on hardware. The
 #: predecessor's behaviour is kept so that a reading can be compared against the
 #: old library register for register without this standing in the way.
-UNRESOLVED: dict[tuple[RegisterKind, int], Disagreement] = {
-    (RegisterKind.INPUT, 2104): Disagreement(
-        "The document gives the solar heat meter flow no scale factor; the predecessor "
-        "scaled it by a tenth. Unit is litres, so both are plausible. Verify against a "
-        "system that has solar before changing either - asked for in "
-        "home-assistant-solarfocus#239."
-    ),
-}
+#:
+#: Empty since input 2104 was measured: see docs/register-document.md.
+UNRESOLVED: dict[tuple[RegisterKind, int], Disagreement] = {}
 
 #: Addresses the document prints wrongly, so the transcription has no row at
 #: the address the register is really at. Not edited into registers.csv: that
