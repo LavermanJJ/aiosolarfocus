@@ -14,13 +14,12 @@ class Solar(Component):
     collector_temperature_2 = celsius(1, doc="Kollektortemperatur 2")
     collector_supply_temperature = celsius(2, doc="Kollektorvorlauftemperatur")
     collector_return_temperature = celsius(3, doc="Kollektorrücklauftemperatur")
-    #: The register document gives 2104 no scale factor; the predecessor scaled
-    #: it by a tenth. Unresolved, and listed in UNRESOLVED in
-    #: tests/test_register_table.py - the predecessor's behaviour is kept until
-    #: hardware settles it, so that a reading here can be compared against the
-    #: old library register for register without this one difference standing in
-    #: the way.
-    flow_heat_meter = tenths(4, unit="l", doc="Durchfluss WMZ")
+    #: The document is right that 2104 has no scale factor, and the predecessor
+    #: was wrong to scale it by a tenth: a Therminator 2 reported 23.3 where the
+    #: eco-manager-touch's own display read 233, so the raw register is the
+    #: reading. The display also gives it as l/h, not the document's l - it is a
+    #: rate, not a volume. See home-assistant-solarfocus#239.
+    flow_heat_meter = unscaled(4, unit="l/h", doc="Durchfluss WMZ")
     current_power = tenths(5, unit="kW", doc="aktuelle Leistung")
     current_yield_heat_meter = unscaled(6, width=2, unit="Wh", doc="Ertrag WMZ")
     today_yield = unscaled(8, width=2, unit="Wh", doc="Tagesertrag")

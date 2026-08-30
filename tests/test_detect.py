@@ -279,15 +279,15 @@ async def test_a_real_pellet_elegance_report_from_237_is_no_longer_told_as_an_oc
     assert detection.system is Systems.PELLETELEGANCE
 
 
-async def test_ragesofts_real_therminator_report_from_237_no_longer_defaults_to_ecotop() -> None:
+async def test_ragesofts_real_therminator_report_from_237_is_told_as_a_therminator() -> None:
     """The real system is a Therminator 2, idling.
 
     log_wood and operating_mode both read 0, which - per
     `test_an_idle_operating_mode_falls_through_to_the_chimney_sweep_check`
-    above - is indistinguishable here from a pellet elegance. That is a known
-    limitation, not something this fixes; what the fix changes is that it no
-    longer defaults to ecotop, which had lost this installation its chimney
-    sweep and pellet-store-reset entities outright.
+    above - separates it from a pellet boiler not at all. What settles it is the
+    block the component states are numbered in: this controller reports its
+    heating circuit at 214 and its buffer at 201, which no from-0 table reaches.
+    It defaulted to ecotop before #237 and to pellet elegance after it.
     """
     values = {
         (INPUT, 2400): 219,  # temperature
@@ -295,12 +295,80 @@ async def test_ragesofts_real_therminator_report_from_237_no_longer_defaults_to_
         (INPUT, 2409): 0,  # operating_mode
         (INPUT, 2410): 0,  # octoplus_buffer bottom / return temperature - unused on a therminator
         (INPUT, 2411): 0,  # octoplus_buffer top
-        (INPUT, 501): 1,
-        (INPUT, 1904): 1,
-        (INPUT, 1107): 2,
+        (INPUT, 501): 200,  # "Trinkwasserspeicher nicht freigeschaltet"
+        (INPUT, 1904): 201,  # buffer 1 in standby
+        (INPUT, 1107): 214,  # heating circuit 1: outdoor shutdown temperature reached
     }
     detection = await detect_through(await controller(values))
-    assert detection.system is not Systems.ECOTOP
+    assert detection.system is Systems.THERMINATOR
+    assert detection.evidence["state_block"] == 200
+
+
+#: fklein1980's Therminator 2, the fourth real report in
+#: home-assistant-solarfocus#237 and the first with solar on it. Transcribed
+#: from the `detect --evidence` output in the issue: one heating circuit, one
+#: buffer, one solar circuit, and a boiler the controller reports in standby.
+#: It was read as a Pellet Elegance with eight heating circuits and four solar
+#: circuits.
+_FKLEIN_THERMINATOR = {
+    (INPUT, 2400): 632,  # temperature
+    (INPUT, 2401): 200,  # status
+    (INPUT, 2409): 4,  # operating_mode: pellets
+    (INPUT, 2410): 351,  # unassigned on a therminator
+    (INPUT, 2411): 0,
+    (INPUT, 2412): 0,  # log_wood: not burning any right now
+    (INPUT, 1107): 214,  # heating circuit 1: outdoor shutdown temperature reached
+    **{(INPUT, 1107 + 50 * index): 212 for index in range(1, 8)},  # "Heizkreis nicht freigeschaltet"
+    (INPUT, 501): 201,  # boiler 1 in standby
+    (INPUT, 1904): 201,  # buffer 1 in standby
+    (INPUT, 2100): 686,  # solar 1: collector, flow, return and store all reporting
+    (INPUT, 2101): 3500,
+    (INPUT, 2102): 688,
+    (INPUT, 2103): 511,
+    (INPUT, 2110): 650,
+    (INPUT, 2113): 219,  # "Solarkreis in Betrieb"
+    **{(INPUT, 2100 + 20 * index + 13): 201 for index in range(1, 4)},  # "Kollektorfühler Kurzschluss"
+}
+
+
+async def test_fkleins_real_therminator_report_from_237_is_told_as_a_therminator() -> None:
+    """On pellets, so mode 4, which a pellet boiler reports as well.
+
+    A combination boiler running pellets says nothing about the logs it can also
+    burn; the from-200 states are what identify it.
+    """
+    detection = await detect_through(await controller(_FKLEIN_THERMINATOR))
+    assert detection.system is Systems.THERMINATOR
+    assert detection.has_biomass_boiler
+    assert not detection.has_heat_pump
+
+
+async def test_fkleins_disabled_heating_circuits_are_not_counted_as_seven_more() -> None:
+    """Seven circuits at 212 are seven circuits "nicht freigeschaltet"."""
+    detection = await detect_through(await controller(_FKLEIN_THERMINATOR))
+    assert detection.counts.heating_circuits == 1
+    assert detection.evidence["heating_circuit_states"] == [214, *[212] * 7]
+
+
+async def test_fkleins_solar_circuit_is_counted_once_not_four_times() -> None:
+    """The three that are not there report a shorted collector sensor and nothing else."""
+    detection = await detect_through(await controller(_FKLEIN_THERMINATOR))
+    assert detection.counts.solar == 1
+    assert detection.counts.buffers == 1
+    assert detection.counts.boilers == 1
+
+
+async def test_a_solar_circuit_with_nothing_but_a_state_is_not_counted() -> None:
+    """The state is read for the evidence and left out of the count.
+
+    It is nonzero on a circuit that is not there - 201 in the from-200 block -
+    and zero on one that is running in the from-0 block, so it settles nothing.
+    """
+    values = dict(VAMPAIR)
+    values[(INPUT, 2113)] = 201
+    detection = await detect_through(await controller(values))
+    assert detection.counts.solar == 0
+    assert detection.evidence["solar"][0] == [0, 0, 0, 0, 0, 201]
 
 
 async def test_lein1013s_real_ecotop_report_is_still_told_as_a_pellet_elegance() -> None:
@@ -357,6 +425,7 @@ async def test_the_evidence_says_what_each_finding_was_read_off() -> None:
     assert detection.evidence["heat_pump"] == {"supply": 285, "return": 240, "state": 1}
     assert detection.evidence["layout"] == {"heating_circuit_state_offset": 7, "buffer_state_offset": 4, "heat_pump": "25.030"}
     assert detection.evidence["api_version_marker"] == "26.020"
+    assert detection.evidence["state_block"] == 0
 
 
 async def test_a_detection_hands_back_the_configuration_it_would_have_been_typed_as() -> None:

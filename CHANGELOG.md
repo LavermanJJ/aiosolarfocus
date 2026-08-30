@@ -2,13 +2,6 @@
 
 ## Unreleased
 
-- **Heating circuit 7's `32900` is settled**, and is no longer a known
-  limitation. The vendor document does carry the row; it prints the address as
-  `32750`, which is circuit 4's, four rows up the same page. The library already
-  read `32900` and goes on doing so. Every known error in the vendor document is
-  now written up in
-  [`docs/register-document.md`](docs/register-document.md).
-
 - **Detection's ecotop/pellet-elegance tie-break rests on evidence now, and
   the evidence is against it.** A real Ecotop `detect --evidence` report
   (home-assistant-solarfocus#237, lein1013) reads the chimney-sweep holding
@@ -21,6 +14,80 @@
   still guesses pellet elegance when the register is mapped, because guessing
   ecotop instead costs a real pellet elegance two working entities, where this
   costs a real ecotop three that read back nothing.
+
+## 0.2.3
+
+- **Solar `2104`, `Durchfluss WMZ`, is no longer scaled by a tenth.** The
+  predecessor scaled it, this library kept the scaling so readings could be
+  compared register for register, and both were wrong: fklein1980's Therminator
+  2 read 23.3 in Home Assistant while the eco-manager-touch's own display, at
+  the same moment, read 233 — home-assistant-solarfocus#239. The document gave
+  it no scale factor and meant it. **The solar flow reading is ten times what it
+  was**, which is what the controller shows. The unit goes with it: the document
+  says `l`, the display says `l/h`, and a *Durchfluss* is a rate, so the table
+  now says `l/h` too.
+
+  This was the last entry in `UNRESOLVED` in `tests/test_register_table.py`.
+  Every register in the table now matches the document, or disagrees with it for
+  a reason measured on hardware.
+
+## 0.2.2
+
+Three detection bugs, all read off one report: fklein1980's Therminator 2 in
+home-assistant-solarfocus#237, the fourth real controller in that issue and the
+first with solar on it. Detection is a setup helper — it fills the form in, it
+does not drive the integration — so nothing here changes what an installation
+already configured by hand reads.
+
+- **A therminator running pellets was detected as a Pellet Elegance.** The
+  only therminator evidence was the log wood input and Kesselbetriebsart 1–3,
+  so a combination boiler that happened to be burning pellets (mode 4) or
+  idling (mode 0) fell through to the pellet boiler guess — which costs it its
+  log wood and boiler operating mode entities, and gains it a return flow
+  temperature read from `2410`, an address a therminator does not assign.
+  Detection now also goes by the block the controller numbers its component
+  states in: a therminator enumerates them from 200, and the ecotop and three
+  Pellet Elegance dumps in the same issue all enumerate from 0, on the same
+  firmware. Both therminators in #237 are now told as therminators, and the
+  block is in the evidence as `state_block`.
+
+- **Heating circuits that are switched off were counted on a therminator.**
+  `HEATING_CIRCUIT_DISABLED` knew only status 7, "Heizkreis nicht
+  freigeschaltet" in the from-0 block; in the from-200 block that state is 212,
+  and the from-200 block is not the other one shifted by 200. A controller with
+  one circuit running and seven off was reported as having eight.
+
+- **Solar circuits that are not installed were counted.** The count took
+  `Solar – Statuszeile` as evidence that a circuit exists, and on the same
+  controller the three absent circuits each reported 201, "Kollektorfühler
+  Kurzschluss" — an absent sensor reading as a shorted one — so one solar
+  circuit was reported as four. The state is now read for the evidence and left
+  out of the count, because it cannot argue the other way either: in the from-0
+  block 0 is "Solarkreis in Betrieb", so a running circuit and an absent one
+  report the same value. The count goes by the collector, flow, return and
+  store sensor channels, which an absent circuit reads as a flat zero.
+
+## 0.2.1
+
+One write bug, found against real hardware while migrating the Home Assistant
+integration onto this library (home-assistant-solarfocus#241).
+
+- **A write to the one register read and written in different units reported a
+  tenth of itself until the next poll.** Heating circuit `32607` is reported in
+  tenths of a percent and accepted as a whole percent; the write went out
+  correctly, but the value cached so the caller need not re-read was the
+  written words decoded at the *read* scale — so 56 % read back as 5.6 % for as
+  long as the poll interval, on a real controller. It now caches what the next
+  read will report, and its raw with it. Every other register is unaffected:
+  the two scales are the same, and the words that went out are the ones that
+  come back. (home-assistant-solarfocus#241)
+
+- **Heating circuit 7's `32900` is settled**, and is no longer a known
+  limitation. The vendor document does carry the row; it prints the address as
+  `32750`, which is circuit 4's, four rows up the same page. The library already
+  read `32900` and goes on doing so. Every known error in the vendor document is
+  now written up in
+  [`docs/register-document.md`](docs/register-document.md).
 
 ## 0.2.0
 
