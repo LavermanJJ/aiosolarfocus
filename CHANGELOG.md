@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **A vampair read an unwritten external outdoor temperature as −999.9 °C.**
+  0.2.4 gave `BiomassBoiler.outdoor_temperature_external` the −9999 sentinel out
+  of home-assistant-solarfocus#237 but left the heat pump's declaration of the
+  register without it. They are the same register: holding 33406, reached at
+  offset 6 from the boiler's 33400 block and at offset 2 from the heat pump's
+  33404 block, and the two components never coexist because they are mutually
+  exclusive by system. So a vampair that nobody has ever fed an outdoor
+  temperature published the same −999.9 °C the issue was about, twenty times
+  below the −50 °C the same register refuses to be written past.
+
+  The sentinel moves from `biomass_boiler.py` to `const.NO_EXTERNAL_TEMPERATURE`
+  and both declarations take it from there, so one register cannot carry two
+  answers to what an unwritten reading means.
+
 ## 0.2.4
 
 Three findings out of home-assistant-solarfocus#237, where owners of

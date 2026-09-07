@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-from ..const import NOT_WIRED_PERCENT, OPEN_CHANNEL, ApiVersion, Systems, every_system_but
+from ..const import NO_EXTERNAL_TEMPERATURE, NOT_WIRED_PERCENT, OPEN_CHANNEL, ApiVersion, Systems, every_system_but
 from ..registers import HOLDING, READ_WRITE, celsius, code, flag, percent, tenths, unscaled
 from .base import Component
 
 #: The ecotop is the one biomass boiler without a chimney sweep function or a
 #: pellet store to reset.
 _NOT_ECOTOP = every_system_but(Systems.ECOTOP)
-
-#: What Außentemperatur extern reads before anybody has written one: -9999,
-#: which the tenths a temperature is read in turn into -999.9 degC - twenty
-#: times below the -50 degC floor this same register refuses to be written past.
-#: All three controllers in home-assistant-solarfocus#237 published it as a
-#: reading. The other two "extern" registers are the heating circuit's and read
-#: a plain 0, so this stays here rather than going next to OPEN_CHANNEL.
-_NO_EXTERNAL_TEMPERATURE = frozenset({2**16 - 9999})
 
 #: Registers 2409 and 2412 belong to a therminator, 2411 to an octoplus, and the
 #: document says so in their names. Reading across them on a system that has
@@ -71,7 +63,7 @@ class BiomassBoiler(Component):
     return_flow_booster_pump = flag(22, since=ApiVersion.V_25_020, doc="Rücklaufanhebungspumpe Ein/Aus")
 
     outdoor_temperature_external = celsius(
-        6, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_23_010, bounds=(-50.0, 60.0), sentinels=OPEN_CHANNEL | _NO_EXTERNAL_TEMPERATURE, doc="Außentemperatur extern"
+        6, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_23_010, bounds=(-50.0, 60.0), sentinels=OPEN_CHANNEL | NO_EXTERNAL_TEMPERATURE, doc="Außentemperatur extern"
     )
     sweep_function_start_stop = flag(10, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_NOT_ECOTOP, signed=True, doc="Kaminkehrerfunktion Start/Stopp")
     sweep_function_extend = flag(11, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_22_090, systems=_NOT_ECOTOP, signed=True, doc="Kaminkehrer Messung verlängern")

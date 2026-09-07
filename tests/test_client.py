@@ -247,6 +247,21 @@ async def test_an_external_outdoor_temperature_nobody_wrote_reads_as_nothing() -
     assert client.biomass_boiler.raw(type(client.biomass_boiler).outdoor_temperature_external) == -9999
 
 
+async def test_the_heat_pump_reads_the_same_unwritten_outdoor_temperature_as_nothing() -> None:
+    """Holding 33406 is one register, reached from either component's block.
+
+    The biomass boiler maps it at offset 6 from 33400 and the heat pump at
+    offset 2 from 33404, and the two are mutually exclusive by system - so a
+    vampair reads the very same -9999 from an untouched controller, and would
+    publish the same -999.9 degC without the sentinel.
+    """
+    client, _ = build(vampair(), values={(HOLDING, 33406): 2**16 - 9999})
+    await client.update()
+    assert client.heat_pump is not None
+    assert client.heat_pump.outdoor_temperature_external is None
+    assert client.heat_pump.raw(type(client.heat_pump).outdoor_temperature_external) == -9999
+
+
 async def test_a_flag_the_controller_left_unset_reads_as_nothing_rather_than_true() -> None:
     """Regression for home-assistant-solarfocus#237.
 
