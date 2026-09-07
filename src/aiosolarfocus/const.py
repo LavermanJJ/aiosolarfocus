@@ -47,6 +47,19 @@ OPEN_CHANNEL = frozenset({1300, 2700, 3500})
 #: `codec.decode` matches sentinels.
 NOT_WIRED_PERCENT = frozenset({2**16 - 1, 2**16 - 999})
 
+#: What Außentemperatur extern reads before anybody has written one: -9999,
+#: which the tenths a temperature is read in turn into -999.9 degC - twenty
+#: times below the -50 degC floor this same register refuses to be written past.
+#: All three controllers in home-assistant-solarfocus#237 published it as a
+#: reading.
+#:
+#: Holding 33406 carries it, and both the heat pump and the biomass boiler map
+#: that address - the two are mutually exclusive by system, so it is one
+#: register wearing two names rather than two registers. It lives here rather
+#: than beside either of them for that reason. The heating circuit's "extern"
+#: registers are not covered by it: those read a plain 0 when unwritten.
+NO_EXTERNAL_TEMPERATURE = frozenset({2**16 - 9999})
+
 #: What a 0/1 register reads when the controller has nothing to put there: -1.
 #: `bool()` makes that True, which is how holding 32003 reported a circulation
 #: request nobody had made on two of the three controllers in #237. Nothing

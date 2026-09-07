@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..const import ApiVersion
+from ..const import NO_EXTERNAL_TEMPERATURE, OPEN_CHANNEL, ApiVersion
 from ..enums import HeatPumpSgReadyMode
 from ..registers import HOLDING, READ_WRITE, celsius, code, derived, energy, enum_, flag, unscaled, watts
 from .base import Component
@@ -72,7 +72,12 @@ class HeatPump(Component):
 
     evu_lock = flag(0, kind=HOLDING, access=READ_WRITE, signed=True, doc="EVU – Lock")
     smart_grid = enum_(1, HeatPumpSgReadyMode, kind=HOLDING, access=READ_WRITE, signed=True, doc="Betriebsart SG – Ready")
-    outdoor_temperature_external = celsius(2, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_20_110, bounds=(-50.0, 60.0), doc="Außentemperatur extern")
+    #: The same holding register the biomass boiler maps as its own - 33406,
+    #: reached from either block - so it reads the same -9999 here when nobody
+    #: has written one, and takes the same sentinel.
+    outdoor_temperature_external = celsius(
+        2, kind=HOLDING, access=READ_WRITE, since=ApiVersion.V_20_110, bounds=(-50.0, 60.0), sentinels=OPEN_CHANNEL | NO_EXTERNAL_TEMPERATURE, doc="Außentemperatur extern"
+    )
 
     @derived(depends_on=("thermal_power_heating", "electrical_power"))
     def cop_heating(self) -> float | None:
