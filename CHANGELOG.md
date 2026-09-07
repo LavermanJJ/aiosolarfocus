@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5
 
 - **A vampair read an unwritten external outdoor temperature as −999.9 °C.**
   0.2.4 gave `BiomassBoiler.outdoor_temperature_external` the −9999 sentinel out
