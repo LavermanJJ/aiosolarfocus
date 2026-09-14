@@ -76,8 +76,6 @@ class ModbusTransport:
         device_id: int = DEFAULT_DEVICE_ID,
         *,
         timeout: float = DEFAULT_TIMEOUT,
-        reconnect_delay: float = 1.0,
-        reconnect_delay_max: float = 60.0,
     ) -> None:
         self.host = host
         self.port = port
@@ -86,8 +84,19 @@ class ModbusTransport:
             host,
             port=port,
             timeout=timeout,
-            reconnect_delay=reconnect_delay,
-            reconnect_delay_max=reconnect_delay_max,
+            # No reconnecting behind the caller's back. Given a delay, pymodbus
+            # answers a lost connection with a task of its own that calls its
+            # `connect()` until one succeeds - and that `connect()` puts the new
+            # transport in place without closing whatever is already there. The
+            # caller's next `connect()` sees no socket and connects too, and
+            # whichever of the two attempts finishes second overwrites the
+            # first. The first socket is then open, unowned and never closed.
+            # Counted on a controller that drops off its powerline link a few
+            # times a day: 23 established sessions from one client, and a
+            # controller with that many stale sessions stops answering new ones
+            # until it is restarted. So every reconnect goes through `connect`
+            # below, under the lock, one attempt at a time.
+            reconnect_delay=0,
             # One attempt per request. pymodbus retries inside the transaction,
             # and three retries at a three second timeout across twenty-odd
             # reads is a refresh that outlasts a ten second poll interval
@@ -142,6 +151,17 @@ class ModbusTransport:
         """Close the socket. Safe to call when it is already closed."""
         self._client.close()
 
+    def _drop_the_socket(self) -> None:
+        """Close a socket a request has just failed on.
+
+        pymodbus closes the transport itself when the peer goes away cleanly,
+        but a request that fails at the socket level can leave `connected`
+        saying True over a socket nothing will answer on. Closing it here makes
+        the caller's next `connect` open a fresh one, rather than time out on
+        the corpse and only then let pymodbus close it.
+        """
+        self._client.close()
+
     async def read(self, kind: RegisterKind, address: int, count: int) -> tuple[int, ...]:
         """Read `count` registers starting at `address`."""
         context = f"reading {kind.value} {address}-{address + count - 1}"
@@ -186,6 +206,7 @@ class ModbusTransport:
                 except TimeoutError as error:
                     raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
                 except (ConnectionException, OSError) as error:
+                    self._drop_the_socket()
                     raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
                 except ModbusException as error:
                     raise SolarfocusProtocolError(str(error), context=context) from error
@@ -198,6 +219,7 @@ class ModbusTransport:
         except TimeoutError as error:
             raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
         except (ConnectionException, OSError) as error:
+            self._drop_the_socket()
             raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
         except ModbusException as error:
             raise SolarfocusProtocolError(str(error), context=context) from error
