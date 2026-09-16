@@ -151,17 +151,6 @@ class ModbusTransport:
         """Close the socket. Safe to call when it is already closed."""
         self._client.close()
 
-    def _drop_the_socket(self) -> None:
-        """Close a socket a request has just failed on.
-
-        pymodbus closes the transport itself when the peer goes away cleanly,
-        but a request that fails at the socket level can leave `connected`
-        saying True over a socket nothing will answer on. Closing it here makes
-        the caller's next `connect` open a fresh one, rather than time out on
-        the corpse and only then let pymodbus close it.
-        """
-        self._client.close()
-
     async def read(self, kind: RegisterKind, address: int, count: int) -> tuple[int, ...]:
         """Read `count` registers starting at `address`."""
         context = f"reading {kind.value} {address}-{address + count - 1}"
@@ -206,7 +195,6 @@ class ModbusTransport:
                 except TimeoutError as error:
                     raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
                 except (ConnectionException, OSError) as error:
-                    self._drop_the_socket()
                     raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
                 except ModbusException as error:
                     raise SolarfocusProtocolError(str(error), context=context) from error
@@ -219,7 +207,6 @@ class ModbusTransport:
         except TimeoutError as error:
             raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
         except (ConnectionException, OSError) as error:
-            self._drop_the_socket()
             raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
         except ModbusException as error:
             raise SolarfocusProtocolError(str(error), context=context) from error

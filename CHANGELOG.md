@@ -16,11 +16,9 @@
 
   pymodbus no longer reconnects on its own (`reconnect_delay=0`); every
   reconnect is the transport's `connect`, under its lock, one attempt at a
-  time. A request that fails at the socket level also closes the socket now,
-  so the next `connect` opens a fresh one rather than the caller timing out on
-  the old one first. The `reconnect_delay` and `reconnect_delay_max` keywords
-  of `ModbusTransport` are gone; nothing in the package or the integration
-  passed them.
+  time. The `reconnect_delay` and `reconnect_delay_max` keywords of
+  `ModbusTransport` are gone; nothing in the package or the integration passed
+  them.
 
 ## 0.2.5
 

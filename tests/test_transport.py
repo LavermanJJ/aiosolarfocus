@@ -10,7 +10,7 @@ import asyncio
 from typing import Any
 
 import pytest
-from pymodbus.exceptions import ConnectionException, ModbusIOException
+from pymodbus.exceptions import ModbusIOException
 from pymodbus.pdu import ExceptionResponse
 
 from aiosolarfocus.const import RegisterKind
@@ -174,54 +174,6 @@ async def test_a_lost_connection_is_not_reconnected_behind_the_callers_back() ->
             assert transport.connected
             assert opened == 1
             assert await transport.read(INPUT, 1100, 1) == (304,)
-        finally:
-            await transport.disconnect()
-
-
-async def test_a_read_that_fails_at_the_socket_drops_the_socket() -> None:
-    """So `connected` stops saying True over a socket nothing answers on.
-
-    The next `connect` then opens a fresh one instead of the caller timing out
-    on the corpse first.
-    """
-    async with running_server(VALUES) as port:
-        transport = ModbusTransport("127.0.0.1", port)
-        await transport.connect()
-
-        async def drop(*args: object, **kwargs: object) -> None:
-            raise ConnectionException("the controller went away")  # type: ignore[no-untyped-call]
-
-        transport._client.read_input_registers = drop  # type: ignore[assignment,method-assign]
-        with pytest.raises(SolarfocusConnectionError):
-            await transport.read(INPUT, 1100, 1)
-        assert not transport.connected
-
-        del transport._client.read_input_registers
-        await transport.connect()
-        try:
-            assert await transport.read(INPUT, 1100, 1) == (304,)
-        finally:
-            await transport.disconnect()
-
-
-async def test_a_write_that_fails_at_the_socket_drops_the_socket() -> None:
-    async with running_server(VALUES) as port:
-        transport = ModbusTransport("127.0.0.1", port)
-        await transport.connect()
-
-        async def drop(*args: object, **kwargs: object) -> None:
-            raise ConnectionException("the controller went away")  # type: ignore[no-untyped-call]
-
-        transport._client.write_registers = drop  # type: ignore[assignment,method-assign]
-        with pytest.raises(SolarfocusConnectionError):
-            await transport.write([(HOLDING, 32600, (480,))])
-        assert not transport.connected
-
-        del transport._client.write_registers
-        await transport.connect()
-        try:
-            await transport.write([(HOLDING, 32600, (480,))])
-            assert await transport.read(HOLDING, 32600, 1) == (480,)
         finally:
             await transport.disconnect()
 
