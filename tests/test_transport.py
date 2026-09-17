@@ -6,6 +6,9 @@ framing, and what pymodbus makes of an exception response.
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import pytest
 from pymodbus.exceptions import ModbusIOException
 from pymodbus.pdu import ExceptionResponse
@@ -131,6 +134,48 @@ async def test_connecting_twice_is_harmless() -> None:
         finally:
             await transport.disconnect()
         assert not transport.connected
+
+
+async def test_a_lost_connection_is_not_reconnected_behind_the_callers_back() -> None:
+    """One socket per controller, however the last one was lost.
+
+    Given a reconnect delay, pymodbus answers a lost connection with a task of
+    its own that calls its `connect()` until one succeeds, and that `connect()`
+    puts the new transport in place without closing whatever is already there.
+    The caller's `connect()` races it, and the socket that loses the race is
+    open, unowned and never closed. Counted on a real controller: 23
+    established sessions from one client after a day of dropouts, at which
+    point the controller stopped answering new ones.
+    """
+    async with running_server(VALUES) as port:
+        transport = ModbusTransport("127.0.0.1", port)
+        await transport.connect()
+        protocol = transport._client.ctx
+        opened = 0
+        create = protocol.call_create
+
+        async def counting_create(*args: Any, **kwargs: Any) -> Any:
+            nonlocal opened
+            opened += 1
+            return await create(*args, **kwargs)
+
+        protocol.call_create = counting_create
+        try:
+            protocol.connection_lost(ConnectionResetError("the controller went away"))
+            lost = transport.connected
+            assert not lost
+
+            await transport.connect()
+            # Long enough for the reconnect task pymodbus would start at its
+            # default delay of a tenth of a second, and at the one second this
+            # transport used to hand it.
+            await asyncio.sleep(1.5)
+
+            assert transport.connected
+            assert opened == 1
+            assert await transport.read(INPUT, 1100, 1) == (304,)
+        finally:
+            await transport.disconnect()
 
 
 async def test_writing_nothing_asks_the_controller_nothing() -> None:

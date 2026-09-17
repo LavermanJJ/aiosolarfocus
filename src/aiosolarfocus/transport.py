@@ -76,8 +76,6 @@ class ModbusTransport:
         device_id: int = DEFAULT_DEVICE_ID,
         *,
         timeout: float = DEFAULT_TIMEOUT,
-        reconnect_delay: float = 1.0,
-        reconnect_delay_max: float = 60.0,
     ) -> None:
         self.host = host
         self.port = port
@@ -86,8 +84,19 @@ class ModbusTransport:
             host,
             port=port,
             timeout=timeout,
-            reconnect_delay=reconnect_delay,
-            reconnect_delay_max=reconnect_delay_max,
+            # No reconnecting behind the caller's back. Given a delay, pymodbus
+            # answers a lost connection with a task of its own that calls its
+            # `connect()` until one succeeds - and that `connect()` puts the new
+            # transport in place without closing whatever is already there. The
+            # caller's next `connect()` sees no socket and connects too, and
+            # whichever of the two attempts finishes second overwrites the
+            # first. The first socket is then open, unowned and never closed.
+            # Counted on a controller that drops off its powerline link a few
+            # times a day: 23 established sessions from one client, and a
+            # controller with that many stale sessions stops answering new ones
+            # until it is restarted. So every reconnect goes through `connect`
+            # below, under the lock, one attempt at a time.
+            reconnect_delay=0,
             # One attempt per request. pymodbus retries inside the transaction,
             # and three retries at a three second timeout across twenty-odd
             # reads is a refresh that outlasts a ten second poll interval

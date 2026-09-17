@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **A controller that dropped off the network left a socket behind every time.**
+  `ModbusTransport` gave pymodbus a reconnect delay, so a lost connection
+  started a reconnect task inside pymodbus that called its `connect()` until one
+  succeeded - and that `connect()` puts the new transport in place without
+  closing whatever is already there. The caller's next `update()` saw no socket
+  and connected too, and whichever of the two attempts finished second
+  overwrote the first. The first socket was then open, unowned and never
+  closed. Counted on a vampair behind a powerline link that drops a few times a
+  day: 23 established sessions from one Home Assistant instance, at which
+  point the controller stopped answering new connections until it was power
+  cycled - the "only a restart helps" of pysolarfocus#52.
+
+  pymodbus no longer reconnects on its own (`reconnect_delay=0`); every
+  reconnect is the transport's `connect`, under its lock, one attempt at a
+  time. The `reconnect_delay` and `reconnect_delay_max` keywords of
+  `ModbusTransport` are gone; nothing in the package or the integration passed
+  them.
+
 ## 0.2.5
 
 - **A vampair read an unwritten external outdoor temperature as −999.9 °C.**
