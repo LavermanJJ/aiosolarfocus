@@ -221,9 +221,20 @@ async def _detect(args: argparse.Namespace) -> int:
             # set, which is every register of it the controller has.
             ("firmware", detection.api_version.label, "  the newest register set this library knows" if detection.api_version is max(ApiVersion) else ""),
         ]
+        unsupported = detection.unsupported()
         for spec in COMPONENTS:
             count = config.count_of(spec.id)
-            rows.append((spec.id.value, str(count), "  never counted; raise it yourself if you have one" if spec.id.value == "differential_modules" else ""))
+            if spec.id in unsupported:
+                # Not reachable on any controller the library has been shown.
+                # If it ever prints, the register document and this library
+                # both have a system wrong, and the owner is the one holding
+                # the proof - so say so where they will see it.
+                note = f"  read {unsupported[spec.id]}, which a {config.system.value} is not supposed to have; please report it"
+            elif spec.id.value == "differential_modules":
+                note = "  never counted; raise it yourself if you have one"
+            else:
+                note = ""
+            rows.append((spec.id.value, str(count), note))
         _print_table(("", "detected", ""), rows)
 
     if args.evidence:

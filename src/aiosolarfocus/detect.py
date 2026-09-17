@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .components import COMPONENTS, ComponentId, spec_for
 from .config import SolarfocusConfig
 from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, DEFAULT_TIMEOUT, OPEN_CHANNEL, ApiVersion, RegisterKind, Systems
 from .transport import ModbusTransport, Transport
@@ -171,24 +172,64 @@ class Detection:
         """
         return self.has_heat_pump or self.has_biomass_boiler
 
+    def unsupported(self) -> Mapping[ComponentId, int]:
+        """What was counted that this system is not supposed to have.
+
+        Empty on every installation the library has been shown. It stops being
+        empty the day a firmware grows a component the register document gives
+        to a system that never implemented it - the therminator's fresh water
+        module, say - which is a finding worth reporting rather than a reading
+        to quietly drop. `config` drops it; the caller says so.
+        """
+        found = {}
+        for spec in COMPONENTS:
+            if spec.available(self.api_version, self.system):
+                continue
+            count = self._counted(spec.id)
+            if count:
+                found[spec.id] = count
+        return found
+
     def config(self, host: str, **overrides: Any) -> SolarfocusConfig:
-        """The configuration this installation would have been typed in as."""
+        """The configuration this installation would have been typed in as.
+
+        A component this system cannot have comes back at zero however it read,
+        so that a detection can never build a configuration its own validation
+        refuses. `unsupported` is where the dropped readings are.
+        """
         config = SolarfocusConfig(
             host=host,
             system=self.system,
             api_version=self.api_version,
-            heating_circuits=self.counts.heating_circuits,
-            buffers=self.counts.buffers,
-            boilers=self.counts.boilers,
-            fresh_water_modules=self.counts.fresh_water_modules,
-            circulations=self.counts.circulations,
-            differential_modules=self.counts.differential_modules,
-            solar=self.counts.solar,
-            fresh_water_module_cascade=self.has_fresh_water_module_cascade,
-            circulation_module=self.has_circulation_module,
-            photovoltaic=self.has_photovoltaic,
+            heating_circuits=self._supported(ComponentId.HEATING_CIRCUITS),
+            buffers=self._supported(ComponentId.BUFFERS),
+            boilers=self._supported(ComponentId.BOILERS),
+            fresh_water_modules=self._supported(ComponentId.FRESH_WATER_MODULES),
+            circulations=self._supported(ComponentId.CIRCULATIONS),
+            differential_modules=self._supported(ComponentId.DIFFERENTIAL_MODULES),
+            solar=self._supported(ComponentId.SOLAR),
+            fresh_water_module_cascade=bool(self._supported(ComponentId.FRESH_WATER_MODULE_CASCADE)),
+            circulation_module=bool(self._supported(ComponentId.CIRCULATION_MODULE)),
+            photovoltaic=bool(self._supported(ComponentId.PHOTOVOLTAIC)),
         )
         return replace(config, **overrides) if overrides else config
+
+    def _counted(self, component_id: ComponentId) -> int:
+        """What was read for this component, before availability is applied."""
+        singles = {
+            ComponentId.FRESH_WATER_MODULE_CASCADE: self.has_fresh_water_module_cascade,
+            ComponentId.CIRCULATION_MODULE: self.has_circulation_module,
+            ComponentId.PHOTOVOLTAIC: self.has_photovoltaic,
+        }
+        if component_id in singles:
+            return int(singles[component_id])
+        return int(getattr(self.counts, component_id.value, 0))
+
+    def _supported(self, component_id: ComponentId) -> int:
+        """What was read, or zero if this system cannot have it."""
+        if not spec_for(component_id).available(self.api_version, self.system):
+            return 0
+        return self._counted(component_id)
 
 
 async def detect(

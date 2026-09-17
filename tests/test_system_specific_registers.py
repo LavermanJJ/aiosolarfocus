@@ -108,6 +108,26 @@ def test_only_a_therminator_reads_the_buffer_x35_sensor(system: Systems) -> None
     assert 1902 not in covered
 
 
+def test_a_therminator_never_reads_the_fresh_water_block() -> None:
+    """It answers reads on 700-704 and 800-802 and never fills them - see #13.
+
+    The exclusion is on the component rather than its registers, so there is
+    nothing to configure and nothing in the plan. `SolarfocusConfig` refuses the
+    count outright; this is the other end, that a plan built from a therminator
+    layout cannot reach the block by any other route.
+    """
+    config = SolarfocusConfig(host="c", system=Systems.THERMINATOR, api_version=NEWEST, heating_circuits=0, buffers=0, boilers=0)
+    covered = {address for read in plan(config.layouts()).slices if read.kind is INPUT for address in read.addresses}
+    assert covered.isdisjoint(range(700, 805))
+
+
+@pytest.mark.parametrize("system", [Systems.VAMPAIR, Systems.ECOTOP, Systems.PELLETELEGANCE, Systems.OCTOPLUS])
+def test_every_other_system_still_reads_its_fresh_water_module(system: Systems) -> None:
+    config = SolarfocusConfig(host="c", system=system, api_version=NEWEST, heating_circuits=0, buffers=0, boilers=0, fresh_water_modules=1)
+    covered = {address for read in plan(config.layouts()).slices if read.kind is INPUT for address in read.addresses}
+    assert {700, 701, 702, 703, 704} <= covered
+
+
 @pytest.mark.asyncio
 async def test_a_pellet_elegance_reads_its_return_flow_temperature_and_not_its_neighbour() -> None:
     """The reported misreading: 270.0 degC where the sensor said 22.1 degC.

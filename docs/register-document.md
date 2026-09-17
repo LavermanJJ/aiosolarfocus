@@ -85,6 +85,62 @@ name does not match the document's" is expected, recorded in `NAME_NOTES`.
 - **Input `2410`** carries three different meanings at one address, split by
   system: the table splits it and the document does not.
 
+## Fresh water module registers a therminator does not implement
+
+Pages 11 and 12 list the fresh water modules (input `700`, `725`, `750`, `775`,
+stride 25) and the cascade over them (input `800`) with no system qualifier. For
+the **therminator** that is wrong: the controller maps the addresses and answers
+reads on them, and the firmware never writes anything into them.
+
+The silence is worth noting, because the document is perfectly willing to speak.
+Two pages earlier it writes *Kesselbetriebsart therminator* on `2409`, and
+`2410` carries a three-way split whose third branch reads *Therminator: nicht
+belegt*. The vocabulary for "this system does not have this register" exists and
+is used; the fresh water block simply does not use it.
+
+The owner of a therminator 2 on firmware 26.020 with a fresh water module
+physically installed took it to Solarfocus support and was told the therminator
+2 lacks the registers in every eco manager-touch version including the newest,
+and that implementing them has been filed with their development as a feature
+request ([#13](https://github.com/LavermanJJ/aiosolarfocus/issues/13)). So this
+is not a document running ahead of a firmware that will catch up on its own
+schedule - it is a claim the firmware has never made good.
+
+What it looks like from here is a module reporting nothing rather than a module
+that is not there, because the reads succeed. In that owner's `detect
+--evidence`:
+
+```
+fresh_water_modules: [(0, 0), (0, 0), (0, 0), (0, 0)]
+fresh_water_module_cascade: [0, 0]
+```
+
+Those are zeros and not `None`, and the difference is the whole point: `None` is
+[a refused address](protocol.md#2-a-read-that-starts-at-an-unmapped-address-is-refused-outright),
+which is how an absent component normally announces itself. Detection therefore
+reached the right count of zero by the ordinary rule that an all-zero block is
+not a live one, and would have gone on doing so - but nothing stopped that owner
+configuring `fresh_water_modules=1` by hand, which is what they did, and getting
+a component whose every register read 0.0 forever.
+
+Both fresh water rows in `components/__init__.py` now carry
+`systems=every_system_but(Systems.THERMINATOR)`, so a therminator is refused the
+count at configuration time with `therminator has no fresh water module` instead
+of reading the block. The cascade is the one step of inference: Solarfocus
+confirmed the module registers, and a cascade over modules a system cannot have
+is not a thing it can have either.
+
+No version gate goes with the exclusion. Solarfocus has a feature request, not a
+release, and a `since` written against a promise would claim a firmware boundary
+nobody has seen. If a therminator ever does report a live fresh water module,
+`detect` says so in its own output - see `Detection.unsupported` - and that
+report is what a version gate should be written from.
+
+The CSV keeps the document's silence about systems, because it is a
+transcription. `registers.csv` has no system column at all, so there is nothing
+in it to be wrong here; the exclusion lives in the component registry, the same
+place the vampair-only heat pump does.
+
 ## What the document does not cover at all
 
 The four behaviours in [`protocol.md`](protocol.md) — read compaction, refusal
