@@ -20,6 +20,32 @@
   `ModbusTransport` are gone; nothing in the package or the integration passed
   them.
 
+- **A therminator was offered a fresh water module it cannot have.** The
+  register document lists the fresh water modules (input 700, stride 25) and the
+  cascade over them (input 800) with no system qualifier, and the therminator
+  never implements them. It maps the addresses and answers reads on them, so
+  they come back as a flat zero rather than the refusal an absent component
+  normally gives - a module reporting nothing, not a module that is not there.
+  Solarfocus confirmed as much to the owner of a therminator 2 with one
+  physically installed, and took implementing them as a feature request (#13).
+
+  Detection had this right already, because an all-zero block is not a live one,
+  but nothing stopped that owner configuring `fresh_water_modules=1` by hand and
+  getting a component whose every register read 0.0 forever. Both rows now carry
+  `systems=every_system_but(Systems.THERMINATOR)`, so the count is refused with
+  `Therminator has no fresh water module` the way the vampair-only heat pump is.
+  Excluding the cascade is inference from the modules: what Solarfocus confirmed
+  was the module registers, and a cascade over modules a system cannot have is
+  not a thing it can have either. Every other system is untouched.
+
+  No firmware floor goes with the exclusion, because there is a feature request
+  and not a release to write one against. `Detection.config` now zeroes any
+  count the system cannot have rather than building a configuration its own
+  validation refuses, `Detection.unsupported` reports what was dropped, and
+  `detect` prints it - so a therminator that ever does report a live fresh water
+  module says so instead of failing, and that report is what a firmware floor
+  should be written from.
+
 ## 0.2.5
 
 - **A vampair read an unwritten external outdoor temperature as −999.9 °C.**

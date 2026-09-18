@@ -65,6 +65,10 @@ class ComponentId(StrEnum):
     BIOMASS_BOILER = "biomass_boiler"
 
 
+#: Named once, because the two fresh water rows have to agree.
+_NOT_THERMINATOR = every_system_but(Systems.THERMINATOR)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ComponentSpec:
     """Where a component's registers live, and how many of it a controller may have."""
@@ -154,6 +158,13 @@ COMPONENTS: tuple[ComponentSpec, ...] = (
         input_stride=25,
         max_count=4,
         since=ApiVersion.V_23_020,
+        #: The therminator maps the block and never fills it. Solarfocus
+        #: confirmed to the owner of a therminator 2 with a fresh water module
+        #: physically installed that no eco manager-touch firmware implements
+        #: these registers for that system, and took it as a feature request -
+        #: so the document offering them to every system is wrong rather than
+        #: ahead of the firmware. See #13 and `docs/register-document.md`.
+        systems=_NOT_THERMINATOR,
     ),
     ComponentSpec(
         id=ComponentId.FRESH_WATER_MODULE_CASCADE,
@@ -161,6 +172,10 @@ COMPONENTS: tuple[ComponentSpec, ...] = (
         component=FreshWaterModuleCascade,
         input_base=800,
         since=ApiVersion.V_23_040,
+        #: A cascade is a cascade over fresh water modules, so a system that
+        #: cannot have one cannot cascade them. This much is inference: what
+        #: Solarfocus confirmed was the module registers.
+        systems=_NOT_THERMINATOR,
     ),
     ComponentSpec(
         id=ComponentId.CIRCULATION_MODULE,

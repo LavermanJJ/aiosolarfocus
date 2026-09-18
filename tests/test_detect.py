@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from aiosolarfocus.client import SolarfocusClient
+from aiosolarfocus.components import ComponentId
 from aiosolarfocus.config import SolarfocusConfig
 from aiosolarfocus.const import ApiVersion, RegisterKind, Systems
 from aiosolarfocus.detect import VERSION_MARKERS, detect_through
@@ -356,6 +357,46 @@ async def test_fkleins_solar_circuit_is_counted_once_not_four_times() -> None:
     assert detection.counts.solar == 1
     assert detection.counts.buffers == 1
     assert detection.counts.boilers == 1
+
+
+async def test_fkleins_therminator_is_offered_no_fresh_water_module() -> None:
+    """His controller reads 700 and 701 as a flat zero, with a module wired to it.
+
+    Solarfocus confirmed the therminator never implements the block (#13), so
+    the zeros are the system and not the installation. Detection reached zero on
+    its own - an all-zero block is not a live one - and the configuration now
+    could not carry a count even if it had.
+    """
+    detection = await detect_through(await controller(_FKLEIN_THERMINATOR))
+    assert detection.system is Systems.THERMINATOR
+    assert detection.counts.fresh_water_modules == 0
+    assert not detection.has_fresh_water_module_cascade
+    assert detection.evidence["fresh_water_modules"] == [(0, 0)] * 4
+    assert detection.config(host="c").fresh_water_modules == 0
+
+
+async def test_a_therminator_that_did_report_a_fresh_water_module_says_so_instead_of_failing() -> None:
+    """The report that would reopen #13, and the reason `config` does not just raise.
+
+    Solarfocus took the missing registers as a feature request, so a firmware
+    may yet implement them. If one does, the owner has to be able to run
+    `detect` and send the output - which is exactly what building a
+    configuration the validation refuses would take away from them.
+    """
+    values = dict(_FKLEIN_THERMINATOR)
+    values.update({(INPUT, 700): 2, (INPUT, 701): 464})  # pump on, 46.4 degC
+    detection = await detect_through(await controller(values))
+
+    assert detection.system is Systems.THERMINATOR
+    assert detection.counts.fresh_water_modules == 1, "the reading is kept as read"
+    assert detection.unsupported() == {ComponentId.FRESH_WATER_MODULES: 1}
+    config = detection.config(host="c")
+    assert config.fresh_water_modules == 0, "and dropped where it would not validate"
+
+
+async def test_an_installation_the_system_can_have_is_never_called_unsupported() -> None:
+    detection = await detect_through(await controller(_FKLEIN_THERMINATOR))
+    assert detection.unsupported() == {}
 
 
 async def test_fkleins_unwired_second_collector_still_counts_the_circuit() -> None:

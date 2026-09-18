@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiosolarfocus.components import ComponentId
+from aiosolarfocus.components import COMPONENTS, ComponentId
 from aiosolarfocus.components.base import Component
 from aiosolarfocus.config import ComponentKey, SolarfocusConfig
 from aiosolarfocus.const import MAX_REGISTERS_PER_READ, ApiVersion, RegisterKind, Systems
@@ -63,7 +63,7 @@ def test_components_that_interleave_are_read_together_and_the_overlap_once() -> 
 @pytest.mark.parametrize("api_version", list(ApiVersion))
 def test_no_read_ever_splits_a_32_bit_register(system: Systems, api_version: ApiVersion) -> None:
     """The controller refuses a one-register read of one, and half a value is not a value."""
-    layouts = config(system, api_version, **_supported(api_version)).layouts()
+    layouts = config(system, api_version, **_supported(api_version, system)).layouts()
     covered = {(read.kind, address) for read in plan(layouts).slices for address in read.addresses}
     for layout in layouts.values():
         for resolved in layout.registers:
@@ -81,7 +81,7 @@ def test_no_read_ever_splits_a_32_bit_register(system: Systems, api_version: Api
 @pytest.mark.parametrize("system", list(Systems))
 @pytest.mark.parametrize("api_version", list(ApiVersion))
 def test_every_wanted_register_is_read_exactly_once(system: Systems, api_version: ApiVersion) -> None:
-    layouts = config(system, api_version, **_supported(api_version)).layouts()
+    layouts = config(system, api_version, **_supported(api_version, system)).layouts()
     reads = plan(layouts).slices
     counted: dict[tuple[RegisterKind, int], int] = {}
     for read in reads:
@@ -96,7 +96,7 @@ def test_every_wanted_register_is_read_exactly_once(system: Systems, api_version
 @pytest.mark.parametrize("system", list(Systems))
 @pytest.mark.parametrize("api_version", list(ApiVersion))
 def test_no_read_exceeds_what_modbus_allows(system: Systems, api_version: ApiVersion) -> None:
-    for read in plan(config(system, api_version, **_supported(api_version)).layouts()).slices:
+    for read in plan(config(system, api_version, **_supported(api_version, system)).layouts()).slices:
         assert read.count <= MAX_REGISTERS_PER_READ
 
 
@@ -168,12 +168,26 @@ def test_the_plan_for_a_vampair_is_what_it_was(snapshot: list[tuple[str, int, in
     ]
 
 
-def _supported(api_version: ApiVersion) -> dict[str, object]:
-    """Trim the configuration to components the firmware in question can have."""
-    return {
-        "fresh_water_modules": 1 if api_version >= ApiVersion.V_23_020 else 0,
-        "circulations": 1 if api_version >= ApiVersion.V_25_030 else 0,
-        "differential_modules": 1 if api_version >= ApiVersion.V_25_030 else 0,
-        "fresh_water_module_cascade": api_version >= ApiVersion.V_23_040,
-        "circulation_module": api_version >= ApiVersion.V_23_040,
-    }
+#: The two the configuration lets the system answer for, which is not a count
+#: to trim, and the ones whose field is a flag rather than a number.
+_SYSTEM_DECIDES = frozenset({"heat_pump", "biomass_boiler"})
+_FLAGS = frozenset({"fresh_water_module_cascade", "circulation_module", "photovoltaic"})
+
+
+def _supported(api_version: ApiVersion, system: Systems) -> dict[str, object]:
+    """Trim the configuration to components this firmware and system can have.
+
+    Read off the specs rather than restated, so a component that gains a
+    firmware floor or loses a system cannot leave a stale copy of the old
+    answer here. It used to list firmware floors by hand, and said nothing
+    about systems at all - which is what the therminator losing its fresh water
+    modules in #13 walked into.
+    """
+    trimmed: dict[str, object] = {}
+    for spec in COMPONENTS:
+        name = spec.id.value
+        if name in _SYSTEM_DECIDES:
+            continue
+        available = spec.available(api_version, system)
+        trimmed[name] = available if name in _FLAGS else int(available)
+    return trimmed

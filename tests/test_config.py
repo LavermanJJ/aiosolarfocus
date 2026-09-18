@@ -61,6 +61,27 @@ def test_a_component_this_system_does_not_have_is_refused() -> None:
         SolarfocusConfig(host="c", system=Systems.ECOTOP, heat_pump=True)
 
 
+def test_a_therminator_is_refused_the_fresh_water_module_the_document_offers_it() -> None:
+    """The register document gives the block to every system; the therminator never implements it.
+
+    Solarfocus confirmed as much to the owner of a therminator 2 that has a
+    fresh water module wired to it and reads nothing but zeros off input 700
+    (#13). The registers answer rather than refuse, so nothing but this stops
+    someone configuring one and watching every reading sit at 0.0 forever.
+    """
+    for field in ("fresh_water_modules", "fresh_water_module_cascade"):
+        with pytest.raises(SolarfocusConfigError, match="Therminator has no fresh water module"):
+            SolarfocusConfig(host="c", system=Systems.THERMINATOR, api_version=ApiVersion.V_26_020, **{field: 1})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("system", [Systems.VAMPAIR, Systems.ECOTOP, Systems.PELLETELEGANCE, Systems.OCTOPLUS])
+def test_every_other_system_still_has_its_fresh_water_modules(system: Systems) -> None:
+    """The exclusion is the therminator's alone - Nugman's Pellet Elegance reports a live one."""
+    config = SolarfocusConfig(host="c", system=system, api_version=ApiVersion.V_26_020, fresh_water_modules=1, fresh_water_module_cascade=True)
+    assert config.count_of(ComponentId.FRESH_WATER_MODULES) == 1
+    assert config.count_of(ComponentId.FRESH_WATER_MODULE_CASCADE) == 1
+
+
 @pytest.mark.parametrize(("field", "value"), [("host", ""), ("timeout", 0.0), ("timeout", -1.0)])
 def test_a_controller_we_could_not_reach_is_refused(field: str, value: object) -> None:
     with pytest.raises(SolarfocusConfigError):
