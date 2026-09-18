@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+Two bugs found by the owners of the controllers they happen on, and one breaking
+change that comes with the first.
+
+**Breaking:** `ModbusTransport` no longer accepts `reconnect_delay` or
+`reconnect_delay_max`. Those keywords are the mechanism of the socket leak
+below - the only thing either one ever configured was how eagerly pymodbus would
+reconnect behind the caller's back - so there is no sensible value left to pass
+rather than a default worth keeping. A caller that passes one now gets a
+`TypeError` naming it, which is the intent: that call site was configuring the
+bug, and it should be read rather than quietly ignored. Nothing in this package
+or in the Home Assistant integration passed either.
 
 - **A controller that dropped off the network left a socket behind every time.**
   `ModbusTransport` gave pymodbus a reconnect delay, so a lost connection
