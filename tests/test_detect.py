@@ -83,6 +83,29 @@ async def test_a_differential_module_is_never_claimed() -> None:
     assert detection.evidence["differential_modules"][0] == [450, 300, 285, 0]
 
 
+async def test_an_array_is_found_while_it_is_making_power() -> None:
+    values = dict(VAMPAIR)
+    values[(INPUT, 2501)] = 3200
+    detection = await detect_through(await controller(values))
+    assert detection.has_photovoltaic
+
+
+async def test_an_array_is_still_found_after_dark() -> None:
+    """Its output is zero every night; the house it is metered with still draws."""
+    values = dict(VAMPAIR)
+    values[(INPUT, 2503)] = 410  # house consumption
+    values[(INPUT, 2507)] = 410  # all of it from the grid
+    detection = await detect_through(await controller(values))
+    assert detection.has_photovoltaic
+    assert detection.evidence["photovoltaic_power"] == 0
+    assert detection.evidence["photovoltaic_balance"] == {"house_consumption": 410, "grid_import": 410, "grid_export": 0}
+
+
+async def test_a_block_of_zeroes_is_no_array() -> None:
+    detection = await detect_through(await controller(VAMPAIR))
+    assert not detection.has_photovoltaic
+
+
 async def test_a_solar_circuit_with_an_open_sensor_still_counts() -> None:
     """A configured channel with no sensor reports 270.0 degC; only a flat zero is absent."""
     values = dict(VAMPAIR)

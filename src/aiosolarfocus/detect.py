@@ -305,8 +305,20 @@ class _Prober:
 
         has_heat_pump, has_biomass_boiler, system = await self._detect_system(heat_pump_is_modern, heating_circuit_states)
 
+        # The array's own output is zero every night, so it cannot be what
+        # says whether there is one. The rest of the block is the house's
+        # energy balance, which the controller only has when a meter is wired
+        # in for the photovoltaic function - and a house draws something at
+        # any hour. Reasoned from the specification rather than measured: the
+        # only reports to hand are of systems without an array.
         photovoltaic_power = await self._dword(INPUT, 2500)
+        photovoltaic_balance = {
+            "house_consumption": await self._dword(INPUT, 2502),
+            "grid_import": await self._dword(INPUT, 2506),
+            "grid_export": await self._dword(INPUT, 2508),
+        }
         self._evidence["photovoltaic_power"] = photovoltaic_power
+        self._evidence["photovoltaic_balance"] = photovoltaic_balance
 
         # The cascade and the circulation module have no documented "not
         # present" value, so this goes by the same rule as solar: a live
@@ -327,7 +339,7 @@ class _Prober:
             counts=counts,
             has_heat_pump=has_heat_pump,
             has_biomass_boiler=has_biomass_boiler,
-            has_photovoltaic=bool(photovoltaic_power),
+            has_photovoltaic=bool(photovoltaic_power) or any(photovoltaic_balance.values()),
             has_fresh_water_module_cascade=api_version >= ApiVersion.V_23_040 and (_live(cascade_state) or _live(cascade_flow)),
             has_circulation_module=api_version >= ApiVersion.V_23_040 and _live(circulation_supply),
             evidence=self._evidence,

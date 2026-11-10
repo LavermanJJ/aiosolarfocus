@@ -19,6 +19,15 @@
 - **Every request was sent twice before it timed out.** `retries=1` is one
   retry on top of the first attempt, not one attempt. It is `retries=0`, so a
   timeout costs one timeout and a write that was not answered is not repeated.
+- **Detection read an unreadable answer as a missing address.** `probe()`
+  returned None for any protocol error as well as for a refusal, so one garbled
+  answer while dating the firmware reported an older version than the
+  controller has, and one while counting dropped a component. Only a refusal is
+  None now; anything else is raised.
+- **`detect` found no photovoltaic array after dark.** It went by the array's
+  output alone, which is zero every night. It also reads the house
+  consumption and the grid import and export from the same block, and any of
+  them being non-zero counts. The evidence gains `photovoltaic_balance`.
 
 ## 0.3.0
 

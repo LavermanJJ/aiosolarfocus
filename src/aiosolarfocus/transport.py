@@ -177,14 +177,17 @@ class ModbusTransport:
         out whole: it refuses a read of one exactly the way a missing address
         does, so a caller that gets None for `count=1` should try `count=2`
         before concluding anything.
+
+        Only a refusal is that answer. An answer that could not be read - the
+        wrong length, the wrong transaction - says nothing about the address,
+        and taken for "not there" it dates a controller to older firmware than
+        it has or drops a component from the counts, so it is raised like any
+        other failed read.
         """
         try:
             return await self.read(kind, address, count)
         except SolarfocusRegisterError as error:
             _LOGGER.debug("Controller has no %s %s: %s", kind.value, address, error)
-            return None
-        except SolarfocusProtocolError as error:
-            _LOGGER.debug("Controller answered %s %s oddly: %s", kind.value, address, error)
             return None
 
     async def write(self, writes: Sequence[Write]) -> None:

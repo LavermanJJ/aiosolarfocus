@@ -334,3 +334,16 @@ async def test_a_cancelled_read_stays_cancelled() -> None:
                     await transport.read(INPUT, 1100, 1)
         finally:
             await transport.disconnect()
+
+
+async def test_probing_does_not_take_an_unreadable_answer_for_a_missing_address() -> None:
+    """Detection would date the firmware by it, or drop a component from the counts."""
+    transport = ModbusTransport("127.0.0.1", 1)
+
+    async def misbehave(*args: object, **kwargs: object) -> None:
+        raise ModbusIOException("request uses transaction id=4 but received 3")
+
+    transport._client.read_input_registers = misbehave  # type: ignore[assignment,method-assign]
+
+    with pytest.raises(SolarfocusProtocolError):
+        await transport.probe(INPUT, 1100)
