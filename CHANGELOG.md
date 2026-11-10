@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **A controller that stopped answering was reported as its components
+  failing, one timeout at a time.** pymodbus raises a `ModbusIOException` for a
+  request nobody answered, not a `TimeoutError`, so the transport passed it on
+  as a `SolarfocusProtocolError` and `update()` charged it to the components in
+  that read and went on to the next one - twenty-odd reads each waiting out
+  their own timeout, with `connected` still true at the end of it. It is a
+  `SolarfocusTimeoutError` now, which ends the refresh at the first read, and
+  the socket is closed with it so a late answer cannot be taken for the answer
+  to the next request.
+- **A cancelled request was not cancelled.** pymodbus catches the
+  `CancelledError` and raises an error of its own in its place, which the
+  transport reported as a failed read; the refresh that was told to stop read
+  its remaining slices, and an `asyncio.timeout` around it never fired. The
+  transport raises `CancelledError` again.
+- **Every request was sent twice before it timed out.** `retries=1` is one
+  retry on top of the first attempt, not one attempt. It is `retries=0`, so a
+  timeout costs one timeout and a write that was not answered is not repeated.
+- **Detection read an unreadable answer as a missing address.** `probe()`
+  returned None for any protocol error as well as for a refusal, so one garbled
+  answer while dating the firmware reported an older version than the
+  controller has, and one while counting dropped a component. Only a refusal is
+  None now; anything else is raised.
+- **`detect` found no photovoltaic array after dark.** It went by the array's
+  output alone, which is zero every night. It also reads the house
+  consumption and the grid import and export from the same block, and any of
+  them being non-zero counts. The evidence gains `photovoltaic_balance`.
+- **A setting written during a refresh went back to its old value until the
+  next one.** The transport's lock is held for one read at a time, so a write
+  can land between two reads of the same refresh; the write put its value in
+  the component, and the refresh then decoded the reading it had taken before
+  the write over it. A refresh now leaves alone any register written while it
+  was reading.
+
 ## 0.3.0
 
 Two bugs found by the owners of the controllers they happen on, and one breaking

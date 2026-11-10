@@ -175,6 +175,39 @@ async def test_a_write_reaches_the_controller_and_is_reflected_at_once() -> None
     assert fake.round_trips == 0
 
 
+async def test_a_write_during_a_refresh_is_not_undone_by_the_reading_taken_before_it() -> None:
+    """The lock is held for one read at a time, so a write can land between two.
+
+    Every read here has already come back with the old value when the write
+    goes out. Decoded afterwards, they would put the setting back until the
+    next refresh.
+    """
+    client, fake = build(values={(HOLDING, 32600): 300, (INPUT, 1100): 304})
+    await client.connect()
+    remaining = len(client.read_plan.slices)
+    read = fake.read
+
+    async def read_then_write(kind: RegisterKind, address: int, count: int) -> tuple[int, ...]:
+        nonlocal remaining
+        words = await read(kind, address, count)
+        remaining -= 1
+        if not remaining:
+            await client.heating_circuits[0].set_target_supply_temperature(45.0)
+        return words
+
+    fake.read = read_then_write  # type: ignore[method-assign]
+    result = await client.update()
+
+    assert not result.failed
+    assert client.heating_circuits[0].target_supply_temperature == 45.0
+    # Everything that was not written is still taken from the refresh.
+    assert client.heating_circuits[0].supply_temperature == 30.4
+
+    fake.read = read  # type: ignore[method-assign]
+    await client.update()
+    assert client.heating_circuits[0].target_supply_temperature == 45.0
+
+
 async def test_a_grouped_write_goes_out_as_one_group() -> None:
     client, fake = build()
     await client.connect()

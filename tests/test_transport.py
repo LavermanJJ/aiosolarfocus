@@ -257,3 +257,93 @@ async def test_only_holding_registers_can_be_written() -> None:
     transport = ModbusTransport("127.0.0.1", 1)
     with pytest.raises(SolarfocusError, match="only holding registers"):
         await transport.write([(INPUT, 1100, (1,))])
+
+
+async def _silent_controller() -> tuple[asyncio.Server, int, list[bytes]]:
+    """A controller that accepts the connection, reads the request and never answers."""
+    received: list[bytes] = []
+
+    async def swallow(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            while data := await reader.read(256):
+                received.append(data)
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(swallow, "127.0.0.1", 0)
+    return server, server.sockets[0].getsockname()[1], received
+
+
+async def test_a_controller_that_stops_answering_is_a_timeout_and_asked_only_once() -> None:
+    """The powerline case: the socket is up and nothing comes back.
+
+    pymodbus reports that as a `ModbusIOException`, which read as a protocol
+    error is a failure of whichever components were in that read - and the
+    client then goes on to wait out the timeout of every read after it.
+    """
+    server, port, received = await _silent_controller()
+    async with server:
+        transport = ModbusTransport("127.0.0.1", port, timeout=0.2)
+        await transport.connect()
+        try:
+            with pytest.raises(SolarfocusTimeoutError, match="did not answer in time"):
+                await transport.read(INPUT, 1100, 1)
+            await asyncio.sleep(0.05)
+            assert len(received) == 1
+            # A late answer must not be read as the answer to the next request.
+            assert not transport.connected
+        finally:
+            await transport.disconnect()
+
+
+async def test_a_write_nobody_answered_is_a_timeout_and_not_sent_twice() -> None:
+    server, port, received = await _silent_controller()
+    async with server:
+        transport = ModbusTransport("127.0.0.1", port, timeout=0.2)
+        await transport.connect()
+        try:
+            with pytest.raises(SolarfocusTimeoutError):
+                await transport.write([(HOLDING, 32600, (480,))])
+            await asyncio.sleep(0.05)
+            assert len(received) == 1
+        finally:
+            await transport.disconnect()
+
+
+async def test_a_cancelled_read_stays_cancelled() -> None:
+    """A cancel is not turned into the error pymodbus raises in its place.
+
+    Passed on as that error, the task that was told to stop carries on: a
+    refresh being unloaded reads its remaining slices, and a timeout around it
+    never fires.
+    """
+    server, port, _ = await _silent_controller()
+    async with server:
+        transport = ModbusTransport("127.0.0.1", port, timeout=5)
+        await transport.connect()
+        try:
+            task = asyncio.create_task(transport.read(INPUT, 1100, 1))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert task.cancelled()
+
+            with pytest.raises(TimeoutError):
+                async with asyncio.timeout(0.1):
+                    await transport.read(INPUT, 1100, 1)
+        finally:
+            await transport.disconnect()
+
+
+async def test_probing_does_not_take_an_unreadable_answer_for_a_missing_address() -> None:
+    """Detection would date the firmware by it, or drop a component from the counts."""
+    transport = ModbusTransport("127.0.0.1", 1)
+
+    async def misbehave(*args: object, **kwargs: object) -> None:
+        raise ModbusIOException("request uses transaction id=4 but received 3")
+
+    transport._client.read_input_registers = misbehave  # type: ignore[assignment,method-assign]
+
+    with pytest.raises(SolarfocusProtocolError):
+        await transport.probe(INPUT, 1100)

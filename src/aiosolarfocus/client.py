@@ -70,6 +70,10 @@ class SolarfocusClient:
 
         self.read_plan: ReadPlan[ComponentKey] = plan(config.layouts())
 
+        # One set per refresh in progress, of the addresses written while it
+        # was reading. See `update`.
+        self._written_meanwhile: list[set[tuple[RegisterKind, int]]] = []
+
     # -- getting at the components ----------------------------------------- #
 
     def __getattr__(self, name: str) -> Any:
@@ -150,19 +154,33 @@ class SolarfocusClient:
 
         readings: dict[tuple[RegisterKind, int], int] = {}
         failed: dict[ComponentKey, SolarfocusError] = {}
-        for read in reads:
-            try:
-                words = await self._transport.read(read.kind, read.address, read.count)
-            except SolarfocusConnectionError:
-                # Not a statement about any component. Let it out, and let the
-                # caller decide the whole system is unreachable.
-                raise
-            except SolarfocusError as error:
-                _LOGGER.debug("Read %s failed: %s", read, error)
-                for key in read.components & wanted:
-                    failed.setdefault(key, error)
-                continue
-            readings.update(zip(((read.kind, address) for address in read.addresses), words, strict=True))
+        written: set[tuple[RegisterKind, int]] = set()
+        self._written_meanwhile.append(written)
+        try:
+            for read in reads:
+                try:
+                    words = await self._transport.read(read.kind, read.address, read.count)
+                except SolarfocusConnectionError:
+                    # Not a statement about any component. Let it out, and let the
+                    # caller decide the whole system is unreachable.
+                    raise
+                except SolarfocusError as error:
+                    _LOGGER.debug("Read %s failed: %s", read, error)
+                    for key in read.components & wanted:
+                        failed.setdefault(key, error)
+                    continue
+                readings.update(zip(((read.kind, address) for address in read.addresses), words, strict=True))
+        finally:
+            self._written_meanwhile.remove(written)
+
+        # A write that went out between two of these reads has already put its
+        # value in the component, and the reading taken before it is the older
+        # of the two. Decoded now it would put the setting back to what it was
+        # until the next refresh - the mode the user just chose, undone on
+        # screen for a poll interval. A register with one address missing is
+        # left alone by `decode_readings`, which is what is wanted.
+        for address in written:
+            readings.pop(address, None)
 
         for key in wanted:
             component = self._components[key]
@@ -207,6 +225,8 @@ class SolarfocusClient:
         """How a component reaches the controller."""
         await self.connect()
         await self._transport.write(writes)
+        for written in self._written_meanwhile:
+            written.update((kind, address + offset) for kind, address, words in writes for offset in range(len(words)))
 
     def __repr__(self) -> str:
         """Name the controller, the system and what is on it."""

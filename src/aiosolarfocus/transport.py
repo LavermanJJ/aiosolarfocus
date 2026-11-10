@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.exceptions import ConnectionException, ModbusException
+from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 from pymodbus.pdu import ExceptionResponse
 
 from .const import DEFAULT_DEVICE_ID, DEFAULT_PORT, DEFAULT_TIMEOUT, RegisterKind, Write
@@ -35,6 +35,10 @@ _ILLEGAL_FUNCTION = 0x01
 _ILLEGAL_ADDRESS = 0x02
 _ILLEGAL_VALUE = 0x03
 _DEVICE_FAILURE = 0x04
+
+# How pymodbus words a request that nobody answered. It has no exception of its
+# own for that, so the message is all there is to tell it by.
+_NO_RESPONSE = "No response received"
 
 
 class Transport(Protocol):
@@ -97,12 +101,14 @@ class ModbusTransport:
             # until it is restarted. So every reconnect goes through `connect`
             # below, under the lock, one attempt at a time.
             reconnect_delay=0,
-            # One attempt per request. pymodbus retries inside the transaction,
-            # and three retries at a three second timeout across twenty-odd
-            # reads is a refresh that outlasts a ten second poll interval
-            # several times over - so a controller that has gone away would
-            # stall the caller rather than fail it.
-            retries=1,
+            # One attempt per request, which pymodbus spells as no retries: it
+            # sends once and then once more per retry. It retries inside the
+            # transaction, and three retries at a three second timeout across
+            # twenty-odd reads is a refresh that outlasts a ten second poll
+            # interval several times over - so a controller that has gone away
+            # would stall the caller rather than fail it. It also means a write
+            # that was not answered is not sent a second time.
+            retries=0,
         )
         # Not for safety - pymodbus already serialises its own transactions -
         # but so that a group of writes goes out with no read of ours between
@@ -171,14 +177,17 @@ class ModbusTransport:
         out whole: it refuses a read of one exactly the way a missing address
         does, so a caller that gets None for `count=1` should try `count=2`
         before concluding anything.
+
+        Only a refusal is that answer. An answer that could not be read - the
+        wrong length, the wrong transaction - says nothing about the address,
+        and taken for "not there" it dates a controller to older firmware than
+        it has or drops a component from the counts, so it is raised like any
+        other failed read.
         """
         try:
             return await self.read(kind, address, count)
         except SolarfocusRegisterError as error:
             _LOGGER.debug("Controller has no %s %s: %s", kind.value, address, error)
-            return None
-        except SolarfocusProtocolError as error:
-            _LOGGER.debug("Controller answered %s %s oddly: %s", kind.value, address, error)
             return None
 
     async def write(self, writes: Sequence[Write]) -> None:
@@ -192,26 +201,43 @@ class ModbusTransport:
                     raise SolarfocusError("only holding registers can be written", context=context)
                 try:
                     result = await self._client.write_registers(address, list(words), device_id=self.device_id)
-                except TimeoutError as error:
-                    raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
-                except (ConnectionException, OSError) as error:
-                    raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
-                except ModbusException as error:
-                    raise SolarfocusProtocolError(str(error), context=context) from error
+                except (ModbusException, OSError) as error:
+                    raise self._failure(error, context) from error
                 _raise_for(result, context)
 
     async def _call(self, kind: RegisterKind, address: int, count: int, context: str) -> Any:
         reader = self._client.read_input_registers if kind is RegisterKind.INPUT else self._client.read_holding_registers
         try:
             result = await reader(address, count=count, device_id=self.device_id)
-        except TimeoutError as error:
-            raise SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context) from error
-        except (ConnectionException, OSError) as error:
-            raise SolarfocusConnectionError(str(error) or "the connection dropped", context=context) from error
-        except ModbusException as error:
-            raise SolarfocusProtocolError(str(error), context=context) from error
+        except (ModbusException, OSError) as error:
+            raise self._failure(error, context) from error
         _raise_for(result, context)
         return result
+
+    def _failure(self, error: ModbusException | OSError, context: str) -> BaseException:
+        """What a request that raised should be reported as.
+
+        pymodbus does not let two things out as themselves. A request nobody
+        answered is a `ModbusIOException` once its attempts are used up, not a
+        `TimeoutError`, and a cancelled one is a `ModbusIOException` as well -
+        it catches the `CancelledError` and raises its own in its place. Read
+        as protocol errors, the first makes a controller that has stopped
+        answering look like one component after another failing, each waiting
+        out its own timeout, and the second makes a task that was told to stop
+        carry on with the rest of its work.
+        """
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            return asyncio.CancelledError()
+        if isinstance(error, TimeoutError) or (isinstance(error, ModbusIOException) and _NO_RESPONSE in str(error)):
+            # Whatever the controller sends now answers a request nobody is
+            # waiting for, and would be taken for the answer to the next one.
+            # Closing the socket is the only way to be sure it is not read.
+            self._client.close()
+            return SolarfocusTimeoutError(f"{self.address} did not answer in time", context=context)
+        if isinstance(error, (ConnectionException, OSError)):
+            return SolarfocusConnectionError(str(error) or "the connection dropped", context=context)
+        return SolarfocusProtocolError(str(error), context=context)
 
 
 def _raise_for(result: Any, context: str) -> None:
