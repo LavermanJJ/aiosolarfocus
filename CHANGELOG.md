@@ -28,6 +28,12 @@
   output alone, which is zero every night. It also reads the house
   consumption and the grid import and export from the same block, and any of
   them being non-zero counts. The evidence gains `photovoltaic_balance`.
+- **A setting written during a refresh went back to its old value until the
+  next one.** The transport's lock is held for one read at a time, so a write
+  can land between two reads of the same refresh; the write put its value in
+  the component, and the refresh then decoded the reading it had taken before
+  the write over it. A refresh now leaves alone any register written while it
+  was reading.
 
 ## 0.3.0
 
