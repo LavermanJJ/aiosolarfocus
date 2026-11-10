@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
+
+Fixes found by reading 0.3.0 against how the Home Assistant integration uses
+it. One of them changes what a caller of `Transport.probe` sees: an answer that
+could not be read is raised now rather than returned as None.
 
 - **A controller that stopped answering was reported as its components
   failing, one timeout at a time.** pymodbus raises a `ModbusIOException` for a
